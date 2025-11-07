@@ -4,13 +4,48 @@ A smart proxy for Claude Code that automatically routes requests to different pr
 
 ## Features
 
-- 🔄 **Automatic Failover**: Routes to alternative providers when primary is slow or unavailable
-- 🌐 **Multi-Provider Support**: Works with Anthropic, OpenAI, OpenRouter, Groq, and more
-- 🔀 **Format Conversion**: Automatically converts between Anthropic and OpenAI API formats
-- 📊 **Performance-Based Routing**: Selects providers based on TPS (tokens per second) metrics
-- 🚦 **Failover-First Routing**: Immediately moves to the next provider, with optional same-provider retries
-- 📈 **TUI Monitoring**: Real-time dashboard with live metrics
-- ⚡ **Streaming Support**: Full support for streaming responses with format conversion
+- **Automatic Failover**: Routes to alternative providers when primary is slow or unavailable
+- **Multi-Provider Support**: Works with Anthropic, OpenAI, OpenRouter, Groq, and more
+- **Format Conversion**: Automatically converts between Anthropic and OpenAI API formats
+- **Performance-Based Routing**: Selects providers based on TPS (tokens per second) metrics
+- **Failover-First Routing**: Immediately moves to the next provider, with optional same-provider retries
+- **TUI Monitoring**: Real-time dashboard with live metrics
+- **Streaming Support**: Full support for streaming responses with format conversion
+- **Admin Dashboard**: Beautiful web UI for managing tokens, viewing analytics, and user management
+
+## Admin Dashboard
+
+![Admin Dashboard](.github/readme/image.png)
+
+The proxy includes a professional admin dashboard with:
+- **Token Management**: Create, manage, and revoke API tokens
+- **Analytics**: View usage statistics, request logs, and monthly summaries
+- **User Management**: Admin controls for multi-user environments
+- **OpenID Connect**: Secure authentication with Google, GitHub, and more
+
+## Installation
+
+### Download Pre-built Binary
+
+Download the latest release for your platform from the [releases page](https://github.com/anthaathi/anthropic-proxy/releases).
+
+**Linux/macOS:**
+```bash
+# Download the appropriate binary for your system
+# Extract and make it executable
+chmod +x anthropic-proxy
+```
+
+**Windows:**
+Download the `.exe` file and run it directly.
+
+### Build from Source
+
+```bash
+git clone https://github.com/anthaathi/anthropic-proxy.git
+cd anthropic-proxy
+go build -o anthropic-proxy
+```
 
 ## Quick Start
 
@@ -23,12 +58,12 @@ cp example.config.yaml config.yaml
 
 3. Run the proxy:
 ```bash
-go run main.go
+./anthropic-proxy
 ```
 
 Or with monitoring UI:
 ```bash
-go run main.go -tui
+./anthropic-proxy -tui
 ```
 
 ## Configure Claude Code
