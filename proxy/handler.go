@@ -22,16 +22,18 @@ type Handler struct {
 	tracker       *metrics.Tracker
 	errorTracker  *metrics.ErrorTracker
 	retryConfig   *retry.Config
+	retrySameProvider bool
 	requestLogger *requestlog.RequestLogger
 }
 
 // NewHandler creates a new proxy handler
-func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, retryConfig *retry.Config, requestLogger *requestlog.RequestLogger) *Handler {
+func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, retryConfig *retry.Config, retrySameProvider bool, requestLogger *requestlog.RequestLogger) *Handler {
 	return &Handler{
 		fallbackMgr:   fallbackMgr,
 		tracker:       tracker,
 		errorTracker:  errorTracker,
 		retryConfig:   retryConfig,
+		retrySameProvider: retrySameProvider,
 		requestLogger: requestLogger,
 	}
 }
@@ -91,10 +93,32 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 		}
 	}
 
+	// Track attempts per unique provider/model combo to avoid duplicate retries
+	attemptedCombos := make(map[string]struct{})
+
 	// Try each provider in order
 	var lastError *ProxyError
 	attemptNumber := 0
 	for _, choice := range providerChoices {
+		key := choice.Provider.Name + "::" + choice.ActualModel
+		if _, seen := attemptedCombos[key]; seen {
+			logger.Debug("Skipping duplicate provider/model combination",
+				"provider", choice.Provider.Name,
+				"model", choice.ActualModel)
+			continue
+		}
+		attemptedCombos[key] = struct{}{}
+
+		if stats := h.errorTracker.GetModelData(choice.Provider.Name, choice.ActualModel); stats != nil &&
+			stats.TotalRequests >= 10 && stats.ErrorRate >= 0.5 {
+			logger.Warn("Skipping provider/model due to high failure rate",
+				"provider", choice.Provider.Name,
+				"model", choice.ActualModel,
+				"errorRate", stats.ErrorRate,
+				"totalRequests", stats.TotalRequests)
+			continue
+		}
+
 		attemptNumber++
 
 		// Update request body with the actual model name for this provider
@@ -152,14 +176,20 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 		h.requestLogger.LogRequest(prov.Name, modelName, "POST", "/v1/messages", headers, body, attemptNumber, false)
 	}
 
-	resp, err := prov.Client.ProxyRequestWithRetry(c.Request.Context(), "POST", "/v1/messages", body, headers, h.retryConfig, prov.Name)
+	var resp *http.Response
+	var err error
+	if h.retrySameProvider {
+		resp, err = prov.Client.ProxyRequestWithRetry(c.Request.Context(), "POST", "/v1/messages", body, headers, h.retryConfig, prov.Name)
+	} else {
+		resp, err = prov.Client.ProxyRequest(c.Request.Context(), "POST", "/v1/messages", body, headers)
+	}
 	duration := time.Since(startTime)
 
 	// Check for network errors
 	if err != nil {
 		proxyErr := ClassifyError(0, err, prov.Name)
 		LogError(proxyErr)
-		h.errorTracker.RecordError(prov.Name, 0)
+		h.errorTracker.RecordError(prov.Name, choice.ActualModel, 0)
 
 		// Log failed response
 		if h.requestLogger != nil {
@@ -174,7 +204,7 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		proxyErr := ClassifyError(resp.StatusCode, nil, prov.Name)
 		LogError(proxyErr)
-		h.errorTracker.RecordError(prov.Name, resp.StatusCode)
+		h.errorTracker.RecordError(prov.Name, choice.ActualModel, resp.StatusCode)
 
 		// Log failed response with status code
 		if h.requestLogger != nil {
@@ -233,7 +263,7 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 	}
 
 	// Record success
-	h.errorTracker.RecordSuccess(prov.Name)
+	h.errorTracker.RecordSuccess(prov.Name, choice.ActualModel)
 
 	// Log successful response
 	if h.requestLogger != nil {

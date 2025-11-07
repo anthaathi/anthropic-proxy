@@ -110,49 +110,39 @@ func (u *ConfigUpdater) TryReloadWithCallback(configPath string, uiCallback func
 		return nil
 	}
 
-	// Use UI callback if provided
-	if uiCallback != nil {
-		uiCallback(changes, func() {
-			// User confirmed - apply changes asynchronously
-			go func() {
-				if err := u.applyConfig(newConfig); err != nil {
-					logger.Error("Config reload failed", "error", err)
-				} else {
-					u.currentConfig = newConfig
-					logger.Info("Configuration reloaded successfully", "changes", len(changes))
+	// TUI mode MUST provide a callback - no fallback to prevent terminal corruption
+	if uiCallback == nil {
+		logger.Error("TryReloadWithCallback called without callback - this indicates a bug")
+		return fmt.Errorf("no UI callback provided for config reload")
+	}
 
-					// Trigger callback if set
-					if u.onConfigChanged != nil {
-						u.onConfigChanged()
-					}
+	// Use UI callback
+	uiCallback(changes, func() {
+		// User confirmed - apply changes asynchronously with panic recovery
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic recovered in config reload goroutine",
+						"panic", fmt.Sprintf("%v", r))
 				}
 			}()
-		}, func() {
-			// User cancelled
-			logger.Info("Configuration reload cancelled by user")
-		})
-		return nil
-	}
 
-	// Fallback to CLI confirmation
-	if !u.confirmChanges(changes) {
+			if err := u.applyConfig(newConfig); err != nil {
+				logger.Error("Config reload failed", "error", err)
+			} else {
+				u.currentConfig = newConfig
+				logger.Info("Configuration reloaded successfully", "changes", len(changes))
+
+				// Trigger callback if set
+				if u.onConfigChanged != nil {
+					u.onConfigChanged()
+				}
+			}
+		}()
+	}, func() {
+		// User cancelled
 		logger.Info("Configuration reload cancelled by user")
-		return nil
-	}
-
-	// Apply changes immediately
-	if err := u.applyConfig(newConfig); err != nil {
-		return fmt.Errorf("failed to apply new config: %w", err)
-	}
-
-	u.currentConfig = newConfig
-	logger.Info("Configuration reloaded successfully", "changes", len(changes))
-
-	// Trigger callback if set
-	if u.onConfigChanged != nil {
-		u.onConfigChanged()
-	}
-
+	})
 	return nil
 }
 
@@ -354,7 +344,11 @@ func (u *ConfigUpdater) calculateChanges(oldConfig, newConfig *Config) []ConfigC
 }
 
 // confirmChanges asks user to confirm configuration changes
+// This is ONLY for CLI mode (server mode with --watch flag without TUI)
+// TUI mode MUST use TryReloadWithCallback with a modal callback instead
 func (u *ConfigUpdater) confirmChanges(changes []ConfigChange) bool {
+	// This function should never be called in TUI mode
+	// If it is, it's a bug and we should not use fmt.Printf
 	fmt.Printf("\n🔄 Configuration changes detected:\n")
 	fmt.Printf("%s\n", strings.Repeat("=", 50))
 

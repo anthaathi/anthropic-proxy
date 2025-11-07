@@ -216,6 +216,7 @@ func extractSystemText(system interface{}) string {
 // OpenAI: {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
 func convertToolsToOpenAI(anthropicTools []interface{}) []interface{} {
 	openaiTools := make([]interface{}, 0, len(anthropicTools))
+	seenNames := make(map[string]struct{}, len(anthropicTools))
 
 	for _, tool := range anthropicTools {
 		toolMap, ok := tool.(map[string]interface{})
@@ -223,11 +224,18 @@ func convertToolsToOpenAI(anthropicTools []interface{}) []interface{} {
 			continue
 		}
 
-		// Convert Anthropic tool to OpenAI format
+		name, _ := toolMap["name"].(string)
+		if name != "" {
+			if _, exists := seenNames[name]; exists {
+				continue // Skip duplicate tool definitions (seen in Anthropic payloads)
+			}
+			seenNames[name] = struct{}{}
+		}
+
 		openaiTool := map[string]interface{}{
 			"type": "function",
 			"function": map[string]interface{}{
-				"name":        toolMap["name"],
+				"name":        name,
 				"description": toolMap["description"],
 				"parameters":  toolMap["input_schema"], // Anthropic uses "input_schema", OpenAI uses "parameters"
 			},

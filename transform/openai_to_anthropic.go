@@ -3,6 +3,7 @@ package transform
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -30,14 +31,9 @@ func OpenAIToAnthropicResponse(openaiBody []byte, model string) ([]byte, error) 
 		choice := openaiResp.Choices[0]
 
 		// Convert content and tool_calls to content blocks
-		contentBlocks := []AnthropicContentBlock{}
-
-		// Add text content if present
-		if contentStr, ok := choice.Message.Content.(string); ok && contentStr != "" {
-			contentBlocks = append(contentBlocks, AnthropicContentBlock{
-				Type: "text",
-				Text: contentStr,
-			})
+		contentBlocks := openAIContentToTextBlocks(choice.Message.Content)
+		if contentBlocks == nil {
+			contentBlocks = []AnthropicContentBlock{}
 		}
 
 		// Convert tool_calls to tool_use blocks
@@ -143,13 +139,14 @@ func OpenAIStreamToAnthropicStream(openaiChunk []byte, model string) ([]string, 
 	}
 
 	// Handle content delta
-	if choice.Delta.Content != "" {
+	textDelta := joinTextSegments(ExtractOpenAIText(choice.Delta.Content))
+	if textDelta != "" {
 		contentDelta := AnthropicStreamEvent{
 			Type:  "content_block_delta",
 			Index: 0,
 			Delta: &AnthropicDelta{
 				Type: "text_delta",
-				Text: choice.Delta.Content,
+				Text: textDelta,
 			},
 		}
 		data, _ := json.Marshal(contentDelta)
@@ -219,6 +216,116 @@ func getString(m map[string]interface{}, key string) string {
 		return val
 	}
 	return ""
+}
+
+// ExtractOpenAIText normalizes OpenAI content (string or array blocks) into plain text segments.
+func ExtractOpenAIText(content interface{}) []string {
+	var texts []string
+
+	switch v := content.(type) {
+	case string:
+		if v != "" {
+			texts = append(texts, v)
+		}
+	case []interface{}:
+		for _, part := range v {
+			if text := extractTextFromContentPart(part); text != "" {
+				texts = append(texts, text)
+			}
+		}
+	case map[string]interface{}:
+		if text := extractTextFromMap(v); text != "" {
+			texts = append(texts, text)
+		}
+	default:
+		if content == nil {
+			return nil
+		}
+
+		if data, err := json.Marshal(content); err == nil {
+			var arr []map[string]interface{}
+			if err := json.Unmarshal(data, &arr); err == nil {
+				for _, part := range arr {
+					if text := extractTextFromMap(part); text != "" {
+						texts = append(texts, text)
+					}
+				}
+				if len(texts) > 0 {
+					return texts
+				}
+			}
+
+			var block map[string]interface{}
+			if err := json.Unmarshal(data, &block); err == nil {
+				if text := extractTextFromMap(block); text != "" {
+					texts = append(texts, text)
+				}
+			}
+		}
+	}
+
+	if len(texts) == 0 {
+		return nil
+	}
+	return texts
+}
+
+func extractTextFromContentPart(part interface{}) string {
+	block, ok := part.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	return extractTextFromMap(block)
+}
+
+func extractTextFromMap(block map[string]interface{}) string {
+	if block == nil {
+		return ""
+	}
+
+	if text, ok := block["text"].(string); ok && text != "" {
+		return text
+	}
+
+	if content, ok := block["content"].(string); ok && content != "" {
+		return content
+	}
+
+	if inner, ok := block["input"].(map[string]interface{}); ok {
+		if text, ok := inner["text"].(string); ok && text != "" {
+			return text
+		}
+	}
+
+	return ""
+}
+
+func openAIContentToTextBlocks(content interface{}) []AnthropicContentBlock {
+	textSegments := ExtractOpenAIText(content)
+	if len(textSegments) == 0 {
+		return nil
+	}
+
+	blocks := make([]AnthropicContentBlock, 0, len(textSegments))
+	for _, text := range textSegments {
+		blocks = append(blocks, AnthropicContentBlock{
+			Type: "text",
+			Text: text,
+		})
+	}
+	return blocks
+}
+
+func joinTextSegments(segments []string) string {
+	if len(segments) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	for _, segment := range segments {
+		builder.WriteString(segment)
+	}
+	return builder.String()
 }
 
 // OpenAIToAnthropicRequest converts an OpenAI request to Anthropic format

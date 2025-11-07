@@ -4,6 +4,7 @@ import (
 	"anthropic-proxy/config"
 	"anthropic-proxy/metrics"
 	"anthropic-proxy/provider"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -15,9 +16,7 @@ type App struct {
 	tviewApp        *tview.Application
 	pages           *tview.Pages
 	overviewPage    *OverviewPage
-	logsPage        *LogsPage
 	configPage      *ConfigPage
-	benchmarkPage   *BenchmarkPage
 	logBuffer       *LogBuffer
 	tracker         *metrics.Tracker
 	errorTracker    *metrics.ErrorTracker
@@ -28,6 +27,7 @@ type App struct {
 	configReloader  *config.Reloader
 	configManager   *ConfigReloadManager
 	stopChan        chan struct{}
+	stopOnce        sync.Once
 }
 
 // NewApp creates a new TUI application
@@ -46,15 +46,11 @@ func NewApp(tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, provid
 
 	// Create pages
 	app.overviewPage = NewOverviewPage(tracker, errorTracker, providerManager, cfg, benchmarker)
-	app.logsPage = NewLogsPage(app.logBuffer)
 	app.configPage = NewConfigPage(cfg)
-	app.benchmarkPage = NewBenchmarkPage(tracker, providerManager, cfg, benchmarker)
 
 	// Add pages to the page manager
 	app.pages.AddPage("overview", app.overviewPage, true, true)
-	app.pages.AddPage("logs", app.logsPage, true, false)
 	app.pages.AddPage("config", app.configPage, true, false)
-	app.pages.AddPage("benchmark", app.benchmarkPage, true, false)
 
 	// Set up navigation
 	app.setupNavigation()
@@ -69,13 +65,7 @@ func NewApp(tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, provid
 			app.SwitchPage("overview")
 			return nil
 		case '2':
-			app.SwitchPage("logs")
-			return nil
-		case '3':
 			app.SwitchPage("config")
-			return nil
-		case '4':
-			app.SwitchPage("benchmark")
 			return nil
 		}
 		return event
@@ -96,9 +86,7 @@ func (a *App) setupNavigation() {
 	}
 
 	a.overviewPage.SetupInputCapture(switchPage)
-	a.logsPage.SetupInputCapture(switchPage)
 	a.configPage.SetupInputCapture(switchPage)
-	a.benchmarkPage.SetupInputCapture(switchPage)
 }
 
 // SwitchPage switches to the specified page
@@ -112,8 +100,20 @@ func (a *App) Run() error {
 	// Start update ticker
 	go a.updateLoop()
 
+	// Set up panic handler to ensure terminal cleanup
+	defer func() {
+		if r := recover(); r != nil {
+			a.tviewApp.Stop()
+			panic(r) // Re-throw after cleanup
+		}
+	}()
+
 	// Run the application
-	return a.tviewApp.Run()
+	if err := a.tviewApp.Run(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // updateLoop periodically updates the display
@@ -124,21 +124,31 @@ func (a *App) updateLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			a.tviewApp.QueueUpdateDraw(func() {
-				// Update the currently visible page
-				currentPage, _ := a.pages.GetFrontPage()
-				switch currentPage {
-				case "overview":
-					a.overviewPage.Update()
-				case "logs":
-					a.logsPage.Update()
-				case "config":
-					// Config page is static, no need to update frequently
-					// a.configPage.Update()
-				case "benchmark":
-					a.benchmarkPage.Update()
-				}
-			})
+			// Check if TUI is still running before queuing update
+			if a.tviewApp == nil {
+				return
+			}
+
+			// Queue the update safely
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Silently handle panic if TUI is shutting down
+					}
+				}()
+
+				a.tviewApp.QueueUpdateDraw(func() {
+					// Update the currently visible page
+					currentPage, _ := a.pages.GetFrontPage()
+					switch currentPage {
+					case "overview":
+						a.overviewPage.Update()
+					case "config":
+						// Config page is static, no need to update frequently
+						// a.configPage.Update()
+					}
+				})
+			}()
 		case <-a.stopChan:
 			return
 		}
@@ -147,8 +157,12 @@ func (a *App) updateLoop() {
 
 // Stop stops the TUI application
 func (a *App) Stop() {
-	close(a.stopChan)
-	a.tviewApp.Stop()
+	a.stopOnce.Do(func() {
+		close(a.stopChan)
+		if a.tviewApp != nil {
+			a.tviewApp.Stop()
+		}
+	})
 }
 
 // GetLogBuffer returns the log buffer for hooking into the logger

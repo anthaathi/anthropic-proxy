@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -155,14 +156,30 @@ func FormatLogEntry(entry LogEntry) string {
 
 	timestamp := entry.Timestamp.Format("15:04:05.000")
 
+	message := escapeMarkup(entry.Message)
+
 	// Format attributes
 	attrStr := ""
 	if len(entry.Attrs) > 0 {
 		for k, v := range entry.Attrs {
-			attrStr += fmt.Sprintf(" [darkgray]%s[white]=[darkgray]%v[white]", k, v)
+			key := escapeMarkup(k)
+			value := escapeMarkup(fmt.Sprintf("%v", v))
+			attrStr += fmt.Sprintf(" [darkgray]%s[white]=[darkgray]%s[white]", key, value)
 		}
 	}
 
 	return fmt.Sprintf("[darkgray]%s[white] %s%s[white] %s%s",
-		timestamp, levelColor, levelStr, entry.Message, attrStr)
+		timestamp, levelColor, levelStr, message, attrStr)
+}
+
+var markupEscaper = strings.NewReplacer(
+	"[", "[[",
+	"]", "[]]",
+)
+
+func escapeMarkup(text string) string {
+	if text == "" {
+		return ""
+	}
+	return markupEscaper.Replace(text)
 }

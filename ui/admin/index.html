@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Anthropic Proxy</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f7fafc;
+            color: #2d3748;
+        }
+
+        .header {
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            padding: 16px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-email {
+            color: #718096;
+            font-size: 14px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a67d8;
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .tokens-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .token-item {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .token-info h3 {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .token-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 13px;
+            color: #718096;
+        }
+
+        .token-prefix {
+            font-family: 'Courier New', monospace;
+            background: #f7fafc;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .token-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .badge-danger {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .badge-warning {
+            background: #feebc8;
+            color: #744210;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .modal-header {
+            margin-bottom: 24px;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+
+        .token-display {
+            background: #f7fafc;
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 16px;
+        }
+
+        .token-display code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            word-break: break-all;
+        }
+
+        .copy-btn {
+            margin-top: 12px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: #718096;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Anthropic Proxy Admin</h1>
+        <div class="user-info">
+            <span class="user-email" id="userEmail">Loading...</span>
+            <button class="btn btn-secondary" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">API Tokens</h2>
+                <button class="btn btn-primary" onclick="showCreateTokenModal()">+ Create Token</button>
+            </div>
+
+            <div id="tokensContainer">
+                <div class="empty-state">
+                    <p>Loading tokens...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Token Modal -->
+    <div id="createTokenModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Create New Token</h3>
+                <p style="color: #718096; font-size: 14px;">Generate a new API token for your applications</p>
+            </div>
+
+            <div id="modalAlert"></div>
+
+            <div id="tokenCreatedDisplay" style="display: none;">
+                <div class="alert alert-success">
+                    Token created successfully! Copy it now - you won't be able to see it again.
+                </div>
+                <div class="token-display">
+                    <code id="newTokenValue"></code>
+                </div>
+                <button class="btn btn-primary copy-btn" onclick="copyToken()">Copy Token</button>
+                <button class="btn btn-secondary copy-btn" onclick="closeCreateTokenModal()">Done</button>
+            </div>
+
+            <div id="tokenCreationForm">
+                <div class="form-group">
+                    <label class="form-label">Token Name</label>
+                    <input type="text" id="tokenName" class="form-input" placeholder="e.g., Production Server" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Expires In (days)</label>
+                    <input type="number" id="tokenExpiry" class="form-input" placeholder="90" value="90" />
+                    <small style="color: #718096;">Enter 0 for no expiration</small>
+                </div>
+
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn btn-primary" onclick="createToken()">Create Token</button>
+                    <button class="btn btn-secondary" onclick="closeCreateTokenModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/admin/app.js"></script>
+</body>
+</html>

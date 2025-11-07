@@ -94,12 +94,13 @@ spec:
       apiKey: env.PERPLEXITY_API_KEY
 
   # Retry configuration (optional)
-  # Controls how requests are retried on failure
+  # Controls backoff parameters when same-provider retries are enabled
   retry:
-    maxRetries: 3                     # Maximum number of retries per provider (default: 3)
-    initialDelay: 100ms               # Initial delay before first retry (default: 100ms)
-    maxDelay: 5s                      # Maximum delay between retries (default: 5s)
-    backoffMultiplier: 2.0            # Exponential backoff multiplier (default: 2.0)
+    retrySameProvider: false          # false = failover immediately; true = retry the same provider before failing over
+    maxRetries: 3                     # Number of same-provider retries when retrySameProvider is true
+    initialDelay: 100ms               # Initial delay before first retry
+    maxDelay: 5s                      # Maximum delay between retries
+    backoffMultiplier: 2.0            # Exponential backoff multiplier
 
   # Model configurations
   # Each model maps to a provider and can have an alias
@@ -208,10 +209,64 @@ spec:
 
   # API keys for authenticating incoming requests
   # These are the keys clients will use to access your proxy
+  # DEPRECATED: Use auth.staticKeys instead for better organization
   apiKeys:
     - "$RANDOM_KEY"                     # Will auto-generate a random key on startup
     - "env.PROXY_API_KEY"               # Read from PROXY_API_KEY environment variable
     - "sk-proxy-example-key-123"        # Static API key example
+
+  # Authentication configuration (NEW)
+  # Supports both static keys and OpenID Connect with database-backed token management
+  auth:
+    # Static API keys (backward compatible, optional)
+    # If you have keys in 'apiKeys' above, they will still work
+    staticKeys:
+      - "sk-static-key-example"
+      - "env.STATIC_API_KEY"
+
+    # Database configuration
+    database:
+      driver: sqlite                    # "sqlite" or "postgres"
+      dsn: ./data/auth.db               # SQLite: file path, PostgreSQL: connection string
+      maxConns: 10                      # Maximum number of database connections
+
+      # PostgreSQL example:
+      # driver: postgres
+      # dsn: "host=localhost port=5432 user=proxy password=secret dbname=proxy_auth sslmode=disable"
+      # maxConns: 20
+
+    # OpenID Connect configuration
+    openid:
+      enabled: true                     # Set to false to disable OAuth, use static keys only
+      provider: google                  # "google", "auth0", "keycloak", or "custom"
+
+      # Option 1: Auto-discovery (recommended)
+      # The proxy will automatically fetch configuration from the provider's .well-known/openid-configuration endpoint
+      issuer: https://accounts.google.com
+
+      # Option 2: Manual configuration (uncomment if your provider doesn't support auto-discovery)
+      # authEndpoint: https://your-provider.com/oauth2/authorize
+      # tokenEndpoint: https://your-provider.com/oauth2/token
+      # userinfoEndpoint: https://your-provider.com/oauth2/userinfo
+      # jwksUrl: https://your-provider.com/.well-known/jwks.json
+
+      # OAuth2 credentials (get these from your OpenID provider)
+      clientId: env.OIDC_CLIENT_ID      # Your OAuth2 client ID
+      clientSecret: env.OIDC_CLIENT_SECRET  # Your OAuth2 client secret
+      redirectUrl: http://localhost:8080/auth/callback  # Must match your provider's allowed redirect URLs
+
+      # Scopes to request (optional, defaults to: openid, email, profile)
+      scopes:
+        - openid
+        - email
+        - profile
+
+    # Admin UI configuration
+    adminUI:
+      enabled: true                     # Enable/disable the admin web interface
+      path: /admin                      # URL path for admin UI (e.g., http://localhost:8080/admin)
+      sessionSecret: env.SESSION_SECRET # Secret key for session encryption (generate with: openssl rand -base64 32)
+      sessionMaxAge: 86400              # Session duration in seconds (86400 = 24 hours)
 
 # Configuration notes:
 #
@@ -239,17 +294,17 @@ spec:
 #   - Can be self-hosted or third-party services
 #
 # Retry Configuration:
-#   - Requests are automatically retried on network errors, rate limits (429), and server errors (5xx)
-#   - Each provider is retried up to maxRetries times with exponential backoff
-#   - After all retries fail, the next provider in the list is tried
-#   - Client errors (4xx except 429) are NOT retried
+#   - By default, the proxy fails over to the next provider immediately.
+#   - Set retrySameProvider: true to retry the same provider using the settings above.
+#   - Retries apply to network errors, rate limits (429), and server errors (5xx).
+#   - Client errors (4xx except 429) are NOT retried.
 #
 # Routing Logic:
 #   1. Models with TPS < 40 are excluded
 #   2. Models are sorted by weight (higher first)
 #   3. If weights are equal, higher TPS wins
-#   4. On failure, retries the same provider with backoff
-#   5. After retries exhausted, tries next provider in order
+#   4. On failure, immediately tries the next provider (unless same-provider retries are enabled)
+#   5. Continues until a provider succeeds or all providers fail
 #
 # Running the proxy:
 #   1. Set environment variables:
@@ -301,3 +356,53 @@ spec:
 #   - Models with weight 0 or negative are treated as weight 1
 #   - Use wildcard aliases for flexible model routing
 #   - Monitor TPS (tokens per second) for performance-based routing
+#
+# Authentication Setup:
+#   1. Generate a session secret:
+#      export SESSION_SECRET=$(openssl rand -base64 32)
+#
+#   2. Set up OpenID provider (example: Google)
+#      - Go to https://console.cloud.google.com/apis/credentials
+#      - Create OAuth 2.0 Client ID
+#      - Add authorized redirect URI: http://localhost:8080/auth/callback
+#      - Copy Client ID and Client Secret
+#      export OIDC_CLIENT_ID=your-client-id
+#      export OIDC_CLIENT_SECRET=your-client-secret
+#
+#   3. Start the server with auth enabled:
+#      go run main.go --tui
+#
+#   4. Access the admin UI:
+#      - Open http://localhost:8080/admin
+#      - Click "Sign in with OpenID"
+#      - Authenticate with your provider
+#      - Create API tokens for your applications
+#
+#   5. Use generated tokens:
+#      curl -X POST http://localhost:8080/v1/messages \
+#        -H "Authorization: Bearer sk-xxx-yyy" \
+#        -H "Content-Type: application/json" \
+#        -d '{"model": "claude-sonnet-4-5-20250929", "messages": [{"role": "user", "content": "Hello!"}], "max_tokens": 1024}'
+#
+# Token Management:
+#   - Tokens are stored securely in the database (hashed with bcrypt)
+#   - Each user can generate multiple tokens with custom names
+#   - Tokens can be revoked at any time through the admin UI
+#   - Optional expiration dates for tokens (90 days recommended)
+#   - Track token usage (last used timestamp)
+#
+# Supported OpenID Providers:
+#   - Google: issuer: https://accounts.google.com
+#   - Auth0: issuer: https://your-tenant.auth0.com/
+#   - Keycloak: issuer: https://your-keycloak.com/realms/your-realm
+#   - Okta: issuer: https://your-domain.okta.com
+#   - Custom: Use manual endpoint configuration
+#
+# Database Options:
+#   - SQLite (default): Great for single-server deployments, no setup required
+#   - PostgreSQL: Recommended for production, supports multiple instances
+#
+# Backward Compatibility:
+#   - Old 'apiKeys' configuration still works without auth section
+#   - Static keys can coexist with database tokens
+#   - No breaking changes to existing deployments

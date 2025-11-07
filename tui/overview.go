@@ -126,7 +126,7 @@ func (p *OverviewPage) updateSummary() {
 	summary := fmt.Sprintf(
 		"[green]Server:[white] http://localhost:%s  [green]Providers:[white] %d  [green]Models:[white] %d%s%s\n"+
 			"[green]Requests:[white] %d  [green]Success:[white] %d  [red]Errors:[white] %d  [yellow]Error Rate:[white] %.2f%%\n"+
-			"[grey]Updated: %s  |  Press Tab/1-4 to switch pages, q to quit",
+			"[grey]Updated: %s  |  Press Tab to switch pages, q to quit",
 		port,
 		p.providerManager.Size(),
 		len(p.cfg.Spec.Models),
@@ -397,10 +397,10 @@ func (p *OverviewPage) SetupInputCapture(switchPage func(string)) {
 	p.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyTab:
-			switchPage("logs")
+			switchPage("config")
 			return nil
 		case tcell.KeyBacktab:
-			switchPage("benchmark") // Go to benchmark on backtab
+			switchPage("config")
 			return nil
 		}
 		return event

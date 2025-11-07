@@ -118,8 +118,8 @@ type OpenAIStreamChoice struct {
 }
 
 type OpenAIStreamDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role    string      `json:"role,omitempty"`
+	Content interface{} `json:"content,omitempty"`
 }
 
 // Anthropic Streaming Types

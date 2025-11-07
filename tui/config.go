@@ -88,8 +88,9 @@ func (p *ConfigPage) Update() {
 		builder.WriteString(fmt.Sprintf("  Initial Delay:      [grey]%s[white]\n", p.cfg.Spec.Retry.InitialDelay))
 		builder.WriteString(fmt.Sprintf("  Max Delay:          [grey]%s[white]\n", p.cfg.Spec.Retry.MaxDelay))
 		builder.WriteString(fmt.Sprintf("  Backoff Multiplier: [grey]%.1f[white]\n", p.cfg.Spec.Retry.BackoffMultiplier))
+		builder.WriteString(fmt.Sprintf("  Retry Same Provider:[grey]%t[white]\n", p.cfg.Spec.Retry.RetrySameProvider))
 	} else {
-		builder.WriteString("  [grey]Using default retry configuration[white]\n")
+		builder.WriteString("  [grey]Using default failover-first strategy (no same-provider retries)[white]\n")
 	}
 	builder.WriteString("\n")
 
@@ -110,12 +111,12 @@ func (p *ConfigPage) Update() {
 	builder.WriteString("  1. Models with TPS < 40 are excluded\n")
 	builder.WriteString("  2. Models are sorted by weight (higher first)\n")
 	builder.WriteString("  3. If weights are equal, higher TPS wins\n")
-	builder.WriteString("  4. On failure, retries the same provider with backoff\n")
-	builder.WriteString("  5. After retries exhausted, tries next provider\n")
+	builder.WriteString("  4. On failure, immediately tries the next provider (unless same-provider retries are enabled)\n")
+	builder.WriteString("  5. Continues until a provider succeeds or all providers fail\n")
 	builder.WriteString("\n")
 
 	// Help text
-	builder.WriteString("[grey]Press Tab/Shift+Tab to switch pages | q to quit[white]")
+	builder.WriteString("[grey]Press Tab to return to Overview | q to quit[white]")
 
 	p.textView.SetText(builder.String())
 }
@@ -128,7 +129,7 @@ func (p *ConfigPage) SetupInputCapture(switchPage func(string)) {
 			switchPage("overview")
 			return nil
 		case tcell.KeyBacktab:
-			switchPage("benchmark") // Go to benchmark on backtab
+			switchPage("overview")
 			return nil
 		}
 		return event

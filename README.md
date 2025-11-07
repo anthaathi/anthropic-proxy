@@ -8,8 +8,8 @@ A smart proxy for Claude Code that automatically routes requests to different pr
 - 🌐 **Multi-Provider Support**: Works with Anthropic, OpenAI, OpenRouter, Groq, and more
 - 🔀 **Format Conversion**: Automatically converts between Anthropic and OpenAI API formats
 - 📊 **Performance-Based Routing**: Selects providers based on TPS (tokens per second) metrics
-- 🔁 **Retry Logic**: Exponential backoff with configurable retry policies
-- 📈 **TUI Monitoring**: Real-time monitoring dashboard with metrics and logs
+- 🚦 **Failover-First Routing**: Immediately moves to the next provider, with optional same-provider retries
+- 📈 **TUI Monitoring**: Real-time dashboard with live metrics
 - ⚡ **Streaming Support**: Full support for streaming responses with format conversion
 
 ## Quick Start
@@ -111,7 +111,7 @@ models:
 - **Provider Types**: Specify `anthropic` or `openai` for each provider
 - **Model Routing**: Use wildcards for flexible model matching
 - **Weights**: Prioritize providers with higher weights
-- **Retry Settings**: Configure exponential backoff and max retries
+- **Failover Settings**: Optional same-provider retries with exponential backoff controls
 - **Performance Thresholds**: Set minimum TPS requirements
 
 ## How It Works
@@ -173,6 +173,23 @@ go run main.go -tps-threshold 50.0
 # Combine flags
 go run main.go -tui -watch -log-file requests.jsonl -tps-threshold 45.0
 ```
+
+### Validate Command
+
+Use the `validate` subcommand to verify your config and refresh model context windows directly from each provider's `/v1/models` endpoint:
+
+```bash
+# Dry run (prints validation summary)
+go run main.go validate --config config.yaml
+
+# Persist refreshed contexts (writes to the supplied path)
+go run main.go validate --config config.yaml --write config.yaml
+
+# Print raw /v1/models payloads for specific providers
+go run main.go validate --config config.yaml --dump-provider zai --dump-provider google
+```
+
+When `--write` is omitted the command only reports differences. With `--write` it serializes the updated config (without comments) to the target path. Add one or more `--dump-provider <name>` flags to print the raw `/v1/models` JSON returned by those providers (useful when a provider omits metadata such as context window sizes). The validator works with both Anthropic-style and OpenAI-style providers.
 
 ### Configuration Hot Reloading
 

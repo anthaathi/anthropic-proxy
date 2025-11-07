@@ -31,7 +31,7 @@ func (h *Handler) handleStreamingRequest(c *gin.Context, prov *provider.Provider
 	if err != nil {
 		proxyErr := ClassifyError(0, err, prov.Name)
 		LogError(proxyErr)
-		h.errorTracker.RecordError(prov.Name, 0)
+		h.errorTracker.RecordError(prov.Name, choice.ActualModel, 0)
 
 		// Log failed response
 		if h.requestLogger != nil {
@@ -47,7 +47,7 @@ func (h *Handler) handleStreamingRequest(c *gin.Context, prov *provider.Provider
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		proxyErr := ClassifyError(resp.StatusCode, nil, prov.Name)
 		LogError(proxyErr)
-		h.errorTracker.RecordError(prov.Name, resp.StatusCode)
+		h.errorTracker.RecordError(prov.Name, choice.ActualModel, resp.StatusCode)
 
 		// Log failed response
 		if h.requestLogger != nil {
@@ -107,7 +107,7 @@ func (h *Handler) handleStreamingRequest(c *gin.Context, prov *provider.Provider
 	}
 
 	// Record success
-	h.errorTracker.RecordSuccess(prov.Name)
+	h.errorTracker.RecordSuccess(prov.Name, choice.ActualModel)
 
 	// Log successful streaming response
 	if h.requestLogger != nil {

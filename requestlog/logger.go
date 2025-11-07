@@ -48,6 +48,11 @@ func NewRequestLogger(filePath string) (*RequestLogger, error) {
 
 // LogRequest logs an outgoing request
 func (rl *RequestLogger) LogRequest(provider, model, method, path string, headers map[string]string, body []byte, attemptNumber int, isStreaming bool) error {
+	// Defensive nil check to prevent panics
+	if rl == nil {
+		return nil // Silently skip logging if logger is not initialized
+	}
+
 	entry := LogEntry{
 		Timestamp:     time.Now(),
 		Direction:     "request",
@@ -67,6 +72,11 @@ func (rl *RequestLogger) LogRequest(provider, model, method, path string, header
 
 // LogResponse logs an incoming response
 func (rl *RequestLogger) LogResponse(provider, model string, statusCode int, headers map[string]string, body []byte, duration time.Duration, tokenCount, attemptNumber int, success bool, errorMsg string, isStreaming bool) error {
+	// Defensive nil check to prevent panics
+	if rl == nil {
+		return nil // Silently skip logging if logger is not initialized
+	}
+
 	entry := LogEntry{
 		Timestamp:     time.Now(),
 		Direction:     "response",
@@ -112,6 +122,11 @@ func (rl *RequestLogger) writeEntry(entry LogEntry) error {
 
 // sanitizeHeaders creates a copy of headers with sensitive data masked
 func (rl *RequestLogger) sanitizeHeaders(headers map[string]string) map[string]string {
+	// Defensive nil check
+	if rl == nil || headers == nil {
+		return make(map[string]string)
+	}
+
 	sanitized := make(map[string]string, len(headers))
 	for k, v := range headers {
 		// Mask authorization headers

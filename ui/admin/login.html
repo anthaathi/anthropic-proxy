@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Anthropic Proxy Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 420px;
+            width: 100%;
+            padding: 48px 40px;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        h1 {
+            color: #1a202c;
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #718096;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .login-button {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .login-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .login-button:active {
+            transform: translateY(0);
+        }
+
+        .login-button svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .info-box {
+            margin-top: 32px;
+            padding: 16px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .info-box h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 8px;
+        }
+
+        .info-box ul {
+            list-style: none;
+            font-size: 13px;
+            color: #4a5568;
+            line-height: 1.6;
+        }
+
+        .info-box ul li {
+            margin-bottom: 4px;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .info-box ul li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="16" fill="url(#gradient)"/>
+                <path d="M32 16L44 24V40L32 48L20 40V24L32 16Z" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="32" cy="32" r="4" fill="white"/>
+                <defs>
+                    <linearGradient id="gradient" x1="0" y1="0" x2="64" y2="64">
+                        <stop offset="0%" stop-color="#667eea"/>
+                        <stop offset="100%" stop-color="#764ba2"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+        </div>
+
+        <h1>Anthropic Proxy</h1>
+        <p class="subtitle">Admin Dashboard</p>
+
+        <a href="/auth/login" style="text-decoration: none;">
+            <button class="login-button">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
+                </svg>
+                Sign in with OpenID
+            </button>
+        </a>
+
+        <div class="info-box">
+            <h3>What you can do:</h3>
+            <ul>
+                <li>Manage API tokens</li>
+                <li>View token usage</li>
+                <li>Generate new keys</li>
+                <li>Revoke access instantly</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

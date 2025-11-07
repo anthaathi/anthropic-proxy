@@ -78,6 +78,14 @@ func NewBenchmarker(providerMgr *provider.Manager, tracker *Tracker, models []co
 func (b *Benchmarker) Start() {
 	ticker := time.NewTicker(b.interval)
 	go func() {
+		// Add panic recovery to prevent terminal corruption in TUI mode
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic recovered in benchmark goroutine",
+					"panic", fmt.Sprintf("%v", r))
+			}
+		}()
+
 		// Run once at startup (after a delay)
 		time.Sleep(30 * time.Second)
 		b.runBenchmark()
@@ -134,6 +142,16 @@ func (b *Benchmarker) runBenchmark() {
 
 // benchmarkProviderModel tests a single provider-model combination
 func (b *Benchmarker) benchmarkProviderModel(prov *provider.Provider, modelName string) {
+	// Add panic recovery for individual benchmark runs
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic recovered in benchmarkProviderModel",
+				"panic", fmt.Sprintf("%v", r),
+				"provider", prov.Name,
+				"model", modelName)
+		}
+	}()
+
 	result := BenchmarkResult{
 		Provider:  prov.Name,
 		Model:     modelName,
@@ -194,7 +212,7 @@ func (b *Benchmarker) benchmarkProviderModel(prov *provider.Provider, modelName 
 		"providerType", prov.Type,
 		"model", modelName,
 		"fullURL", fullURL,
-		"requestBody", string(bodyBytes))
+		"requestBytes", len(bodyBytes))
 
 	// Log request to file if logger is enabled
 	if b.requestLogger != nil {
@@ -237,7 +255,7 @@ func (b *Benchmarker) benchmarkProviderModel(prov *provider.Provider, modelName 
 			"model", modelName,
 			"statusCode", resp.StatusCode,
 			"duration", duration.String(),
-			"errorBody", string(errorBody))
+			"errorBodyLen", len(errorBody))
 
 		result.ErrorMessage = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(errorBody))
 
@@ -280,8 +298,7 @@ func (b *Benchmarker) benchmarkProviderModel(prov *provider.Provider, modelName 
 		"provider", prov.Name,
 		"providerType", prov.Type,
 		"model", modelName,
-		"bodyLength", len(responseBody),
-		"bodyPreview", truncateString(string(responseBody), 500))
+		"bodyLength", len(responseBody))
 
 	// Convert OpenAI response to Anthropic format if needed
 	finalResponseBody := responseBody
@@ -297,7 +314,7 @@ func (b *Benchmarker) benchmarkProviderModel(prov *provider.Provider, modelName 
 				"provider", prov.Name,
 				"model", modelName,
 				"error", err.Error(),
-				"rawResponse", truncateString(string(responseBody), 1000))
+				"rawResponseLen", len(responseBody))
 
 			// Try to extract tokens from raw OpenAI response as fallback
 			logger.Info("Attempting fallback token extraction from raw OpenAI response",
@@ -573,7 +590,10 @@ func convertOpenAIStreamToAnthropic(openaiStream []byte, model string) ([]byte, 
 				anthropicLines = append(anthropicLines, "data: "+string(startJSON))
 			}
 
-			if choice.Delta.Content != "" && !contentBlockStarted {
+			textSegments := transform.ExtractOpenAIText(choice.Delta.Content)
+			textDelta := strings.Join(textSegments, "")
+
+			if textDelta != "" && !contentBlockStarted {
 				contentBlockStarted = true
 				blockStartEvent := map[string]interface{}{
 					"type":  "content_block_start",
@@ -588,13 +608,13 @@ func convertOpenAIStreamToAnthropic(openaiStream []byte, model string) ([]byte, 
 			}
 
 			// Handle content delta
-			if choice.Delta.Content != "" {
+			if textDelta != "" {
 				deltaEvent := map[string]interface{}{
 					"type":  "content_block_delta",
 					"index": 0,
 					"delta": map[string]interface{}{
 						"type": "text_delta",
-						"text": choice.Delta.Content,
+						"text": textDelta,
 					},
 				}
 				deltaJSON, _ := json.Marshal(deltaEvent)
@@ -650,10 +670,12 @@ func parseOpenAIStreamingResponse(sseData string) (outputTokens int, inputTokens
 			if err := json.Unmarshal([]byte(dataJSON), &chunk); err == nil {
 				if len(chunk.Choices) > 0 {
 					choice := chunk.Choices[0]
-					if choice.Delta.Content != "" {
+					textParts := transform.ExtractOpenAIText(choice.Delta.Content)
+					textDelta := strings.Join(textParts, "")
+					if textDelta != "" {
 						// Rough estimate: ~4 chars per token
-						textTokens := len(choice.Delta.Content) / 4
-						if textTokens == 0 && len(choice.Delta.Content) > 0 {
+						textTokens := len(textDelta) / 4
+						if textTokens == 0 && len(textDelta) > 0 {
 							textTokens = 1
 						}
 						outputTokens += textTokens
@@ -664,12 +686,4 @@ func parseOpenAIStreamingResponse(sseData string) (outputTokens int, inputTokens
 	}
 
 	return outputTokens, inputTokens
-}
-
-// truncateString truncates a string to maxLen characters
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "... (truncated)"
 }

@@ -10,10 +10,11 @@ import (
 
 // Service manages dynamic API key authentication
 type Service struct {
-	keyMap    map[string]bool
-	keyList   []string // Keep order for potential display
-	mu        sync.RWMutex
-	middleware gin.HandlerFunc
+	keyMap       map[string]bool
+	keyList      []string // Keep order for potential display
+	mu           sync.RWMutex
+	middleware   gin.HandlerFunc
+	tokenManager *TokenManager // Database token manager (optional)
 }
 
 // NewService creates a new dynamic authentication service
@@ -26,6 +27,12 @@ func NewService() *Service {
 	// Create middleware that calls the service's validate method
 	s.middleware = s.createMiddleware()
 	return s
+}
+
+// SetTokenManager sets the token manager for database-backed authentication
+func (s *Service) SetTokenManager(tm *TokenManager) {
+	s.tokenManager = tm
+	logger.Info("Token manager enabled for database authentication")
 }
 
 // UpdateKeys updates the list of valid API keys
@@ -57,11 +64,24 @@ func (s *Service) GetKeys() []string {
 	return keys
 }
 
-// ValidateKey checks if a key is valid
+// ValidateKey checks if a key is valid (supports both static keys and database tokens)
 func (s *Service) ValidateKey(key string) bool {
+	// First check static keys (fast path, no database lookup)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.keyMap[key]
+	isStaticKey := s.keyMap[key]
+	s.mu.RUnlock()
+
+	if isStaticKey {
+		return true
+	}
+
+	// If token manager is available, check database tokens
+	if s.tokenManager != nil {
+		_, err := s.tokenManager.ValidateToken(key)
+		return err == nil
+	}
+
+	return false
 }
 
 // Middleware returns the authentication middleware

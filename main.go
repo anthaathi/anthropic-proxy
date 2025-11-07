@@ -1,8 +1,10 @@
 package main
 
 import (
+	"anthropic-proxy/api"
 	"anthropic-proxy/auth"
 	"anthropic-proxy/config"
+	"anthropic-proxy/database"
 	"anthropic-proxy/logger"
 	"anthropic-proxy/metrics"
 	"anthropic-proxy/model"
@@ -13,7 +15,11 @@ import (
 	"anthropic-proxy/router"
 	"anthropic-proxy/tui"
 	"context"
+	"embed"
 	"flag"
+	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
@@ -24,6 +30,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed ui/admin/*
+var adminUI embed.FS
 
 func main() {
 	// Parse command-line flags
@@ -83,6 +92,74 @@ func main() {
 	authService := auth.NewService()
 	authService.UpdateKeys(cfg.Spec.APIKeys)
 
+	// Initialize authentication components (database, OIDC, etc.)
+	var db *database.DB
+	var dbRepo *database.Repository
+	var oidcClient *auth.OIDCClient
+	var sessionManager *auth.SessionManager
+	var tokenManager *auth.TokenManager
+
+	if cfg.Spec.Auth != nil {
+		// Merge old APIKeys with new StaticKeys for backward compatibility
+		staticKeys := cfg.Spec.APIKeys
+		if len(cfg.Spec.Auth.StaticKeys) > 0 {
+			staticKeys = append(staticKeys, cfg.Spec.Auth.StaticKeys...)
+		}
+		authService.UpdateKeys(staticKeys)
+
+		// Initialize database if configured
+		if cfg.Spec.Auth.Database.Driver != "" && cfg.Spec.Auth.Database.DSN != "" {
+			dbCfg := database.Config{
+				Driver:   cfg.Spec.Auth.Database.Driver,
+				DSN:      cfg.Spec.Auth.Database.DSN,
+				MaxConns: cfg.Spec.Auth.Database.MaxConns,
+			}
+
+			var err error
+			db, err = database.NewDB(dbCfg)
+			if err != nil {
+				log.Printf("WARNING: Failed to connect to database: %v", err)
+				log.Printf("Continuing with static keys only")
+			} else {
+				// Run migrations
+				if err := db.AutoMigrate(); err != nil {
+					log.Printf("WARNING: Failed to run migrations: %v", err)
+					log.Printf("Continuing with static keys only")
+					db.Close()
+					db = nil
+				} else {
+					dbRepo = database.NewRepository(db)
+					tokenManager = auth.NewTokenManager(dbRepo)
+					authService.SetTokenManager(tokenManager)
+					logger.Info("Database authentication enabled")
+				}
+			}
+		}
+
+		// Initialize OpenID Connect if enabled
+		if cfg.Spec.Auth.OpenID.Enabled {
+			var err error
+			oidcClient, err = auth.NewOIDCClient(cfg.Spec.Auth.OpenID)
+			if err != nil {
+				log.Printf("WARNING: Failed to initialize OIDC: %v", err)
+				log.Printf("Admin UI will not be available")
+			} else {
+				logger.Info("OpenID Connect initialized")
+			}
+		}
+
+		// Initialize session manager if admin UI is enabled
+		if cfg.Spec.Auth.AdminUI.Enabled {
+			if cfg.Spec.Auth.AdminUI.SessionSecret == "" {
+				log.Printf("WARNING: Admin UI session secret not configured")
+				log.Printf("Admin UI will not be available")
+			} else {
+				sessionManager = auth.NewSessionManager(cfg.Spec.Auth.AdminUI)
+				logger.Info("Admin UI session manager initialized")
+			}
+		}
+	}
+
 	tracker := metrics.NewTracker()
 	errorTracker := metrics.NewErrorTracker()
 
@@ -101,11 +178,14 @@ func main() {
 	selector := router.NewSelector(modelRegistry, providerMgr, tracker, *tpsThreshold)
 	fallbackMgr := router.NewFallbackManager(selector)
 
-	// Initialize retry configuration
+	// Initialize retry configuration (used only when retrying the same provider is enabled)
 	retryConfig := retry.DefaultConfig()
+	retrySameProvider := false
 	if cfg.Spec.Retry != nil {
 		if cfg.Spec.Retry.MaxRetries > 0 {
 			retryConfig.MaxRetries = cfg.Spec.Retry.MaxRetries
+		} else {
+			retryConfig.MaxRetries = 0
 		}
 		if cfg.Spec.Retry.InitialDelay != "" {
 			if d, err := time.ParseDuration(cfg.Spec.Retry.InitialDelay); err == nil {
@@ -120,6 +200,9 @@ func main() {
 		if cfg.Spec.Retry.BackoffMultiplier > 0 {
 			retryConfig.BackoffMultiplier = cfg.Spec.Retry.BackoffMultiplier
 		}
+		if cfg.Spec.Retry.RetrySameProvider {
+			retrySameProvider = true
+		}
 	}
 
 	// Start benchmark job
@@ -128,17 +211,21 @@ func main() {
 	defer benchmarker.Stop()
 
 	// Initialize handlers (needed for both modes)
-	proxyHandler := proxy.NewHandler(fallbackMgr, tracker, errorTracker, retryConfig, reqLogger)
+	proxyHandler := proxy.NewHandler(fallbackMgr, tracker, errorTracker, retryConfig, retrySameProvider, reqLogger)
 	modelsHandler := proxy.NewModelsHandler(modelRegistry)
 	healthHandler := proxy.NewHealthHandler(providerMgr, tracker, errorTracker)
 	countTokensHandler := proxy.NewCountTokensHandler(fallbackMgr)
 
 	// Start HTTP server in background
-	srv := startHTTPServer(cfg, proxyHandler, modelsHandler, healthHandler, countTokensHandler, authService)
+	srv := startHTTPServer(cfg, proxyHandler, modelsHandler, healthHandler, countTokensHandler, authService, oidcClient, sessionManager, dbRepo, tokenManager)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
+		// Close database connection
+		if db != nil {
+			db.Close()
+		}
 	}()
 
 	// Setup config reloader if enabled (for non-TUI mode)
@@ -186,28 +273,131 @@ func main() {
 	}
 }
 
-func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHandler *proxy.ModelsHandler, healthHandler *proxy.HealthHandler, countTokensHandler *proxy.CountTokensHandler, authService *auth.Service) *http.Server {
+// customRecoveryMiddleware provides panic recovery without writing to stderr
+func customRecoveryMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				// Log through our logger instead of writing to stderr
+				logger.Error("Panic recovered in HTTP handler",
+					"error", fmt.Sprintf("%v", err),
+					"path", c.Request.URL.Path)
+				c.AbortWithStatus(http.StatusInternalServerError)
+			}
+		}()
+		c.Next()
+	}
+}
+
+// setupAdminRoutes sets up admin UI and authentication routes
+func setupAdminRoutes(r *gin.Engine, cfg *config.Config, oidcClient *auth.OIDCClient, sessionManager *auth.SessionManager, dbRepo *database.Repository, tokenManager *auth.TokenManager) {
+	// Create API handlers
+	authHandler := api.NewAuthHandler(oidcClient, sessionManager, dbRepo)
+	tokenHandler := api.NewTokenHandler(tokenManager, sessionManager, dbRepo)
+
+	// Auth flow endpoints (no auth required)
+	authGroup := r.Group("/auth")
+	{
+		authGroup.GET("/login", authHandler.HandleLogin)
+		authGroup.GET("/callback", authHandler.HandleCallback)
+		authGroup.POST("/logout", authHandler.HandleLogout)
+		authGroup.GET("/logout", authHandler.HandleLogout) // Support GET as well
+	}
+
+	// Admin UI static files
+	adminPath := cfg.Spec.Auth.AdminUI.GetAdminPath()
+	adminGroup := r.Group(adminPath)
+	{
+		// Serve embedded admin UI files
+		adminFS, err := fs.Sub(adminUI, "ui/admin")
+		if err != nil {
+			logger.Error("Failed to load admin UI", "error", err.Error())
+		} else {
+			// Login page (no auth required)
+			adminGroup.GET("/login", func(c *gin.Context) {
+				// Check if already authenticated
+				if sessionManager.IsAuthenticated(c) {
+					c.Redirect(http.StatusTemporaryRedirect, adminPath)
+					return
+				}
+				data, err := fs.ReadFile(adminFS, "login.html")
+				if err != nil {
+					c.String(http.StatusInternalServerError, "Failed to load login page")
+					return
+				}
+				c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+			})
+
+			// Main dashboard (requires auth)
+			adminGroup.GET("", func(c *gin.Context) {
+				// Check authentication
+				if !sessionManager.IsAuthenticated(c) {
+					c.Redirect(http.StatusTemporaryRedirect, adminPath+"/login")
+					return
+				}
+				data, err := fs.ReadFile(adminFS, "index.html")
+				if err != nil {
+					c.String(http.StatusInternalServerError, "Failed to load dashboard")
+					return
+				}
+				c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+			})
+
+			// Serve JavaScript file
+			adminGroup.GET("/app.js", func(c *gin.Context) {
+				data, err := fs.ReadFile(adminFS, "app.js")
+				if err != nil {
+					c.String(http.StatusInternalServerError, "Failed to load script")
+					return
+				}
+				c.Data(http.StatusOK, "application/javascript; charset=utf-8", data)
+			})
+		}
+	}
+
+	// API endpoints for token management (requires session auth)
+	apiAuthGroup := r.Group("/api/auth")
+	apiAuthGroup.Use(sessionManager.RequireAuth())
+	{
+		apiAuthGroup.GET("/user", authHandler.HandleGetUser)
+		apiAuthGroup.GET("/tokens", tokenHandler.HandleListTokens)
+		apiAuthGroup.POST("/tokens", tokenHandler.HandleCreateToken)
+		apiAuthGroup.DELETE("/tokens/:id", tokenHandler.HandleRevokeToken)
+		apiAuthGroup.PUT("/tokens/:id", tokenHandler.HandleUpdateToken)
+	}
+
+	logger.Info("Admin UI and authentication routes configured",
+		"adminPath", adminPath,
+		"loginURL", adminPath+"/login")
+}
+
+func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHandler *proxy.ModelsHandler, healthHandler *proxy.HealthHandler, countTokensHandler *proxy.CountTokensHandler, authService *auth.Service, oidcClient *auth.OIDCClient, sessionManager *auth.SessionManager, dbRepo *database.Repository, tokenManager *auth.TokenManager) *http.Server {
 	// Setup Gin router
 	gin.SetMode(gin.ReleaseMode)
 
 	// Disable Gin's default logging to prevent interference with TUI
-	gin.DefaultWriter = nil
-	gin.DefaultErrorWriter = nil
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
 
 	r := gin.New()
-	// Use recovery middleware but not the logger middleware
-	r.Use(gin.Recovery())
+	// Use custom recovery middleware that logs through our logger instead of stderr
+	r.Use(customRecoveryMiddleware())
 
 	// Health check (no auth required)
 	r.GET("/health", healthHandler.HandleHealth)
 
+	// Setup admin UI and auth routes if configured
+	if cfg.Spec.Auth != nil && cfg.Spec.Auth.AdminUI.Enabled && oidcClient != nil && sessionManager != nil && dbRepo != nil {
+		setupAdminRoutes(r, cfg, oidcClient, sessionManager, dbRepo, tokenManager)
+	}
+
 	// API routes (with authentication)
-	api := r.Group("/v1")
-	api.Use(authService.Middleware())
+	apiGroup := r.Group("/v1")
+	apiGroup.Use(authService.Middleware())
 	{
-		api.POST("/messages", proxyHandler.HandleMessages)
-		api.POST("/messages/count_tokens", countTokensHandler.HandleCountTokens)
-		api.GET("/models", modelsHandler.HandleListModels)
+		apiGroup.POST("/messages", proxyHandler.HandleMessages)
+		apiGroup.POST("/messages/count_tokens", countTokensHandler.HandleCountTokens)
+		apiGroup.GET("/models", modelsHandler.HandleListModels)
 	}
 
 	// Setup HTTP server
@@ -224,8 +414,15 @@ func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHand
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Start server in a goroutine
+	// Start server in a goroutine with panic recovery
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic recovered in HTTP server goroutine",
+					"panic", fmt.Sprintf("%v", r))
+			}
+		}()
+
 		logger.Info("Starting server", "port", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server error", "error", err.Error())
@@ -302,6 +499,23 @@ func runTUIMode(cfg *config.Config, tracker *metrics.Tracker, errorTracker *metr
 	logger.Info("Configuration loaded",
 		"providers", len(cfg.Spec.Providers),
 		"models", len(cfg.Spec.Models))
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Handle signals in background with panic recovery
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic recovered in signal handler goroutine",
+					"panic", fmt.Sprintf("%v", r))
+			}
+		}()
+
+		<-sigChan
+		tuiApp.Stop()
+	}()
 
 	// Run TUI
 	if err := tuiApp.Run(); err != nil {
