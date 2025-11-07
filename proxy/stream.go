@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"anthropic-proxy/auth"
 	"anthropic-proxy/logger"
 	"anthropic-proxy/provider"
 	"anthropic-proxy/router"
@@ -108,6 +109,21 @@ func (h *Handler) handleStreamingRequest(c *gin.Context, prov *provider.Provider
 
 	// Record success
 	h.errorTracker.RecordSuccess(prov.Name, choice.ActualModel)
+
+	// Record analytics if user tracking is enabled
+	// For streaming, we don't track detailed input/output tokens separately
+	if h.analyticsService != nil {
+		userID, hasUser := auth.GetUserID(c)
+		if hasUser {
+			tokenID, _ := auth.GetTokenID(c)
+			var tokenIDPtr *uint
+			if tokenID > 0 {
+				tokenIDPtr = &tokenID
+			}
+			// For streaming, we only have total tokens, not separated input/output
+			h.analyticsService.RecordRequest(userID, tokenIDPtr, modelName, prov.Name, 0, totalTokens, duration, "success", "")
+		}
+	}
 
 	// Log successful streaming response
 	if h.requestLogger != nil {

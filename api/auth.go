@@ -188,6 +188,16 @@ func (h *AuthHandler) findOrCreateUser(userInfo *auth.UserInfo) (*database.User,
 		return nil, err
 	}
 
+	// User not found, check if this is the first user
+	userCount, err := h.repo.GetUserCount()
+	if err != nil {
+		logger.Error("Failed to get user count", "error", err.Error())
+		// Continue anyway, just won't be admin
+		userCount = 1
+	}
+
+	isFirstUser := userCount == 0
+
 	// User not found, create new user
 	now := time.Now().UTC()
 	user = &database.User{
@@ -195,6 +205,7 @@ func (h *AuthHandler) findOrCreateUser(userInfo *auth.UserInfo) (*database.User,
 		Name:           userInfo.Name,
 		ProviderUserID: userInfo.Sub,
 		Provider:       "openid", // Generic provider name
+		IsAdmin:        isFirstUser, // First user becomes admin
 		LastLoginAt:    &now,
 	}
 
@@ -202,7 +213,12 @@ func (h *AuthHandler) findOrCreateUser(userInfo *auth.UserInfo) (*database.User,
 		return nil, err
 	}
 
-	logger.Info("Created new user", "user_id", user.ID, "email", user.Email)
+	if isFirstUser {
+		logger.Info("Created first user with admin privileges", "user_id", user.ID, "email", user.Email)
+	} else {
+		logger.Info("Created new user", "user_id", user.ID, "email", user.Email)
+	}
+
 	return user, nil
 }
 
@@ -244,6 +260,7 @@ func (h *AuthHandler) HandleGetUser(c *gin.Context) {
 		"id":            user.ID,
 		"email":         user.Email,
 		"name":          user.Name,
+		"is_admin":      user.IsAdmin,
 		"created_at":    user.CreatedAt,
 		"last_login_at": user.LastLoginAt,
 	})

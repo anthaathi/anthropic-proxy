@@ -163,3 +163,148 @@ func (r *Repository) CountUserTokens(userID uint) (int64, error) {
 	err := r.db.Model(&Token{}).Where("user_id = ? AND revoked = ?", userID, false).Count(&count).Error
 	return count, err
 }
+
+// ==================== ADDITIONAL USER OPERATIONS ====================
+
+// GetUserCount returns the total number of users
+func (r *Repository) GetUserCount() (int64, error) {
+	var count int64
+	err := r.db.Model(&User{}).Count(&count).Error
+	return count, err
+}
+
+// GetAllUsers retrieves all users (for admin)
+func (r *Repository) GetAllUsers() ([]User, error) {
+	var users []User
+	err := r.db.Order("created_at DESC").Find(&users).Error
+	return users, err
+}
+
+// PromoteToAdmin promotes a user to admin
+func (r *Repository) PromoteToAdmin(userID uint) error {
+	return r.db.Model(&User{}).Where("id = ?", userID).Update("is_admin", true).Error
+}
+
+// DemoteFromAdmin removes admin privileges from a user
+func (r *Repository) DemoteFromAdmin(userID uint) error {
+	return r.db.Model(&User{}).Where("id = ?", userID).Update("is_admin", false).Error
+}
+
+// ==================== REQUEST LOG OPERATIONS ====================
+
+// CreateRequestLog creates a new request log entry
+func (r *Repository) CreateRequestLog(log *RequestLog) error {
+	return r.db.Create(log).Error
+}
+
+// GetUserRequestLogs retrieves recent request logs for a user
+func (r *Repository) GetUserRequestLogs(userID uint, limit int, offset int) ([]RequestLog, error) {
+	var logs []RequestLog
+	err := r.db.Where("user_id = ?", userID).
+		Order("timestamp DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&logs).Error
+	return logs, err
+}
+
+// GetAllRequestLogs retrieves recent request logs across all users (admin)
+func (r *Repository) GetAllRequestLogs(limit int, offset int) ([]RequestLog, error) {
+	var logs []RequestLog
+	err := r.db.Preload("User").
+		Order("timestamp DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&logs).Error
+	return logs, err
+}
+
+// CountUserRequestLogs counts total request logs for a user
+func (r *Repository) CountUserRequestLogs(userID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&RequestLog{}).Where("user_id = ?", userID).Count(&count).Error
+	return count, err
+}
+
+// DeleteOldRequestLogs deletes request logs older than the specified time
+func (r *Repository) DeleteOldRequestLogs(before time.Time) (int64, error) {
+	result := r.db.Where("timestamp < ?", before).Delete(&RequestLog{})
+	return result.RowsAffected, result.Error
+}
+
+// GetRequestLogsToAggregate retrieves logs that need to be aggregated
+func (r *Repository) GetRequestLogsToAggregate(before time.Time) ([]RequestLog, error) {
+	var logs []RequestLog
+	err := r.db.Where("timestamp < ?", before).Find(&logs).Error
+	return logs, err
+}
+
+// ==================== USAGE SUMMARY OPERATIONS ====================
+
+// GetOrCreateMonthlySummary gets or creates a monthly usage summary
+func (r *Repository) GetOrCreateMonthlySummary(userID uint, year, month int) (*UsageSummary, error) {
+	var summary UsageSummary
+	err := r.db.Where("user_id = ? AND year = ? AND month = ?", userID, year, month).
+		First(&summary).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Create new summary
+		summary = UsageSummary{
+			UserID:  userID,
+			Year:    year,
+			Month:   month,
+			Models:  "{}",
+			Providers: "{}",
+		}
+		if err := r.db.Create(&summary).Error; err != nil {
+			return nil, err
+		}
+		return &summary, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &summary, nil
+}
+
+// UpdateMonthlySummary updates a monthly usage summary
+func (r *Repository) UpdateMonthlySummary(summary *UsageSummary) error {
+	return r.db.Save(summary).Error
+}
+
+// GetUserSummaries retrieves usage summaries for a user
+func (r *Repository) GetUserSummaries(userID uint, limit int) ([]UsageSummary, error) {
+	var summaries []UsageSummary
+	err := r.db.Where("user_id = ?", userID).
+		Order("year DESC, month DESC").
+		Limit(limit).
+		Find(&summaries).Error
+	return summaries, err
+}
+
+// GetAllUserSummaries retrieves recent usage summaries for all users (admin)
+func (r *Repository) GetAllUserSummaries(limit int) ([]UsageSummary, error) {
+	var summaries []UsageSummary
+	err := r.db.Preload("User").
+		Order("year DESC, month DESC").
+		Limit(limit).
+		Find(&summaries).Error
+	return summaries, err
+}
+
+// GetUserTotalUsage calculates total usage stats for a user
+func (r *Repository) GetUserTotalUsage(userID uint) (totalRequests, totalTokens int64, err error) {
+	var summary struct {
+		TotalRequests int64
+		TotalTokens   int64
+	}
+
+	err = r.db.Model(&UsageSummary{}).
+		Select("COALESCE(SUM(total_requests), 0) as total_requests, COALESCE(SUM(total_tokens), 0) as total_tokens").
+		Where("user_id = ?", userID).
+		Scan(&summary).Error
+
+	return summary.TotalRequests, summary.TotalTokens, err
+}

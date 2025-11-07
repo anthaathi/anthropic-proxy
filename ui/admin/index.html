@@ -4,338 +4,313 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Anthropic Proxy</title>
+
+    <!-- Google Fonts - Space Grotesk -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'sans': ['Space Grotesk', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#f0f4ff',
+                            100: '#e0e9ff',
+                            200: '#c7d7fe',
+                            300: '#a5b8fc',
+                            400: '#8693f8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            800: '#3730a3',
+                            900: '#312e81',
+                        },
+                        apex: {
+                            bg: '#f8f9fa',
+                            card: '#ffffff',
+                            border: '#e1e5eb',
+                            text: '#1a202c',
+                            muted: '#64748b',
+                        }
+                    },
+                    boxShadow: {
+                        'apex': '0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+                        'apex-lg': '0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04)',
+                    }
+                }
+            }
+        }
+    </script>
+
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: #f7fafc;
-            color: #2d3748;
+            font-family: 'Space Grotesk', system-ui, sans-serif;
         }
 
-        .header {
-            background: white;
-            border-bottom: 1px solid #e2e8f0;
-            padding: 16px 32px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        /* Custom animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        .header h1 {
-            font-size: 20px;
-            font-weight: 600;
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out;
         }
 
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 16px;
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
         }
 
-        .user-email {
-            color: #718096;
-            font-size: 14px;
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
         }
 
-        .btn {
-            padding: 8px 16px;
-            border-radius: 6px;
-            border: none;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #5a67d8;
-        }
-
-        .btn-danger {
-            background: #f56565;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #e53e3e;
-        }
-
-        .btn-secondary {
-            background: #e2e8f0;
-            color: #4a5568;
-        }
-
-        .btn-secondary:hover {
-            background: #cbd5e0;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 32px;
-        }
-
-        .card {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            padding: 24px;
-            margin-bottom: 24px;
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .card-title {
-            font-size: 18px;
-            font-weight: 600;
-        }
-
-        .tokens-grid {
-            display: grid;
-            gap: 16px;
-        }
-
-        .token-item {
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 16px;
-            display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 16px;
-            align-items: center;
-        }
-
-        .token-info h3 {
-            font-size: 16px;
-            font-weight: 500;
-            margin-bottom: 8px;
-        }
-
-        .token-meta {
-            display: flex;
-            gap: 16px;
-            font-size: 13px;
-            color: #718096;
-        }
-
-        .token-prefix {
-            font-family: 'Courier New', monospace;
-            background: #f7fafc;
-            padding: 4px 8px;
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
             border-radius: 4px;
         }
 
-        .token-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .badge-success {
-            background: #c6f6d5;
-            color: #22543d;
-        }
-
-        .badge-danger {
-            background: #fed7d7;
-            color: #742a2a;
-        }
-
-        .badge-warning {
-            background: #feebc8;
-            color: #744210;
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-
-        .modal.active {
-            display: flex;
-        }
-
-        .modal-content {
-            background: white;
-            border-radius: 12px;
-            padding: 32px;
-            max-width: 500px;
-            width: 90%;
-        }
-
-        .modal-header {
-            margin-bottom: 24px;
-        }
-
-        .modal-title {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 8px;
-        }
-
-        .form-input {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-
-        .form-input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .alert {
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            font-size: 14px;
-        }
-
-        .alert-success {
-            background: #c6f6d5;
-            color: #22543d;
-        }
-
-        .alert-error {
-            background: #fed7d7;
-            color: #742a2a;
-        }
-
-        .token-display {
-            background: #f7fafc;
-            padding: 16px;
-            border-radius: 6px;
-            border: 1px solid #e2e8f0;
-            margin-bottom: 16px;
-        }
-
-        .token-display code {
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            word-break: break-all;
-        }
-
-        .copy-btn {
-            margin-top: 12px;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 48px 24px;
-            color: #718096;
-        }
-
-        .empty-state svg {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 16px;
-            opacity: 0.5;
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
         }
     </style>
 </head>
-<body>
-    <div class="header">
-        <h1>Anthropic Proxy Admin</h1>
-        <div class="user-info">
-            <span class="user-email" id="userEmail">Loading...</span>
-            <button class="btn btn-secondary" onclick="logout()">Logout</button>
-        </div>
-    </div>
+<body class="bg-apex-bg min-h-screen">
 
-    <div class="container">
-        <div class="card">
-            <div class="card-header">
-                <h2 class="card-title">API Tokens</h2>
-                <button class="btn btn-primary" onclick="showCreateTokenModal()">+ Create Token</button>
-            </div>
-
-            <div id="tokensContainer">
-                <div class="empty-state">
-                    <p>Loading tokens...</p>
+    <!-- Header -->
+    <header class="bg-white border-b border-apex-border shadow-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-700 rounded-lg flex items-center justify-center shadow-md">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-apex-text">Anthropic Proxy</h1>
+                        <p class="text-xs text-apex-muted">Admin Dashboard</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="adminBadge"></span>
+                    <div class="text-right hidden sm:block">
+                        <p class="text-sm font-medium text-apex-text" id="userEmail">Loading...</p>
+                        <p class="text-xs text-apex-muted">Administrator</p>
+                    </div>
+                    <button onclick="logout()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-all duration-200 text-sm shadow-sm">
+                        Logout
+                    </button>
                 </div>
             </div>
         </div>
-    </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="bg-white border-b border-apex-border shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex space-x-1" role="tablist">
+                <button class="nav-tab active px-6 py-4 font-medium text-sm transition-all duration-200 border-b-2 border-transparent focus:outline-none" onclick="switchTab('tokens')" data-tab="tokens">
+                    <span class="flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                        </svg>
+                        <span>Tokens</span>
+                    </span>
+                </button>
+                <button class="nav-tab px-6 py-4 font-medium text-sm transition-all duration-200 border-b-2 border-transparent focus:outline-none" onclick="switchTab('analytics')" data-tab="analytics">
+                    <span class="flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        <span>Analytics</span>
+                    </span>
+                </button>
+                <button id="usersTab" class="nav-tab hidden px-6 py-4 font-medium text-sm transition-all duration-200 border-b-2 border-transparent focus:outline-none" onclick="switchTab('users')" data-tab="users">
+                    <span class="flex items-center space-x-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        <span>Users</span>
+                    </span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Tokens Tab -->
+        <div id="tokensContent" class="tab-content active">
+            <!-- Configuration Section -->
+            <div id="configSection" class="mb-8 animate-fade-in"></div>
+
+            <!-- Tokens Section -->
+            <div class="bg-white rounded-xl shadow-apex border border-apex-border overflow-hidden animate-fade-in">
+                <div class="px-6 py-5 border-b border-apex-border bg-gradient-to-r from-slate-50 to-white">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-bold text-apex-text">API Tokens</h2>
+                            <p class="text-sm text-apex-muted mt-1">Manage your API access tokens</p>
+                        </div>
+                        <button onclick="showCreateTokenModal()" class="px-5 py-2.5 bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200 flex items-center space-x-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                            <span>Create Token</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="p-6" id="tokensContainer">
+                    <div class="text-center py-12 text-apex-muted">
+                        <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        <p>Loading tokens...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analytics Tab -->
+        <div id="analyticsContent" class="tab-content hidden">
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 animate-fade-in">
+                <div class="bg-white rounded-xl shadow-apex border border-apex-border p-6 hover:shadow-apex-lg transition-shadow duration-200">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-apex-muted mb-1">Total Requests</p>
+                            <p class="text-3xl font-bold text-apex-text" id="totalRequests">-</p>
+                        </div>
+                        <div class="w-12 h-12 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-apex border border-apex-border p-6 hover:shadow-apex-lg transition-shadow duration-200">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-apex-muted mb-1">Total Tokens</p>
+                            <p class="text-3xl font-bold text-apex-text" id="totalTokens">-</p>
+                        </div>
+                        <div class="w-12 h-12 bg-gradient-to-br from-purple-100 to-purple-200 rounded-xl flex items-center justify-center">
+                            <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Requests -->
+            <div class="bg-white rounded-xl shadow-apex border border-apex-border overflow-hidden mb-8 animate-fade-in">
+                <div class="px-6 py-5 border-b border-apex-border bg-gradient-to-r from-slate-50 to-white">
+                    <h2 class="text-xl font-bold text-apex-text">Recent Requests</h2>
+                    <p class="text-sm text-apex-muted mt-1">Latest API activity and usage</p>
+                </div>
+                <div class="overflow-x-auto" id="recentLogs">
+                    <div class="text-center py-12 text-apex-muted">
+                        <p>Loading analytics...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monthly Summary -->
+            <div class="bg-white rounded-xl shadow-apex border border-apex-border overflow-hidden animate-fade-in">
+                <div class="px-6 py-5 border-b border-apex-border bg-gradient-to-r from-slate-50 to-white">
+                    <h2 class="text-xl font-bold text-apex-text">Monthly Summary</h2>
+                    <p class="text-sm text-apex-muted mt-1">Historical usage statistics</p>
+                </div>
+                <div class="overflow-x-auto" id="monthlySummary">
+                    <div class="text-center py-12 text-apex-muted">
+                        <p>Loading summaries...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Tab (Admin Only) -->
+        <div id="usersContent" class="tab-content hidden">
+            <div id="usersStatsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 animate-fade-in"></div>
+
+            <div class="bg-white rounded-xl shadow-apex border border-apex-border overflow-hidden animate-fade-in">
+                <div class="px-6 py-5 border-b border-apex-border bg-gradient-to-r from-slate-50 to-white">
+                    <h2 class="text-xl font-bold text-apex-text">All Users</h2>
+                    <p class="text-sm text-apex-muted mt-1">Manage user accounts and permissions</p>
+                </div>
+                <div class="overflow-x-auto" id="usersContainer">
+                    <div class="text-center py-12 text-apex-muted">
+                        <p>Loading users...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
 
     <!-- Create Token Modal -->
-    <div id="createTokenModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 class="modal-title">Create New Token</h3>
-                <p style="color: #718096; font-size: 14px;">Generate a new API token for your applications</p>
+    <div id="createTokenModal" class="modal fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="modal-content bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto animate-fade-in">
+            <div class="px-8 py-6 border-b border-apex-border bg-gradient-to-r from-primary-50 to-blue-50">
+                <h3 class="text-2xl font-bold text-apex-text">Create New Token</h3>
+                <p class="text-sm text-apex-muted mt-1">Generate a new API token for your applications</p>
             </div>
 
-            <div id="modalAlert"></div>
+            <div class="p-8">
+                <div id="modalAlert"></div>
 
-            <div id="tokenCreatedDisplay" style="display: none;">
-                <div class="alert alert-success">
-                    Token created successfully! Copy it now - you won't be able to see it again.
-                </div>
-                <div class="token-display">
-                    <code id="newTokenValue"></code>
-                </div>
-                <button class="btn btn-primary copy-btn" onclick="copyToken()">Copy Token</button>
-                <button class="btn btn-secondary copy-btn" onclick="closeCreateTokenModal()">Done</button>
-            </div>
-
-            <div id="tokenCreationForm">
-                <div class="form-group">
-                    <label class="form-label">Token Name</label>
-                    <input type="text" id="tokenName" class="form-input" placeholder="e.g., Production Server" />
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Expires In (days)</label>
-                    <input type="number" id="tokenExpiry" class="form-input" placeholder="90" value="90" />
-                    <small style="color: #718096;">Enter 0 for no expiration</small>
+                <div id="tokenCreatedDisplay" class="hidden">
+                    <div class="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg mb-6">
+                        <p class="font-semibold">Token created successfully!</p>
+                        <p class="text-sm mt-1">Copy it now - you won't be able to see it again.</p>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
+                        <code class="text-sm break-all font-mono text-slate-700" id="newTokenValue"></code>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button onclick="copyToken()" class="flex-1 px-5 py-3 bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200">
+                            Copy Token
+                        </button>
+                        <button onclick="closeCreateTokenModal()" class="flex-1 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-all duration-200">
+                            Done
+                        </button>
+                    </div>
                 </div>
 
-                <div style="display: flex; gap: 12px;">
-                    <button class="btn btn-primary" onclick="createToken()">Create Token</button>
-                    <button class="btn btn-secondary" onclick="closeCreateTokenModal()">Cancel</button>
+                <div id="tokenCreationForm">
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold text-apex-text mb-2">Token Name</label>
+                        <input type="text" id="tokenName" class="w-full px-4 py-3 border border-apex-border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 outline-none" placeholder="e.g., Production Server" />
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold text-apex-text mb-2">Expires In (days)</label>
+                        <input type="number" id="tokenExpiry" class="w-full px-4 py-3 border border-apex-border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 outline-none" placeholder="90" value="90" />
+                        <p class="text-sm text-apex-muted mt-2">Enter 0 for no expiration</p>
+                    </div>
+
+                    <div class="flex space-x-3">
+                        <button onclick="createToken()" class="flex-1 px-5 py-3 bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200">
+                            Create Token
+                        </button>
+                        <button onclick="closeCreateTokenModal()" class="flex-1 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition-all duration-200">
+                            Cancel
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

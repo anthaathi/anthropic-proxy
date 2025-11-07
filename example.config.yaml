@@ -267,6 +267,11 @@ spec:
       path: /admin                      # URL path for admin UI (e.g., http://localhost:8080/admin)
       sessionSecret: env.SESSION_SECRET # Secret key for session encryption (generate with: openssl rand -base64 32)
       sessionMaxAge: 86400              # Session duration in seconds (86400 = 24 hours)
+      baseUrl: http://localhost:8080    # Base URL for the proxy (used in config display)
+
+    # Analytics configuration
+    dataRetentionDays: 30               # How many days to keep detailed request logs (default: 30)
+                                         # Older logs are aggregated into monthly summaries and deleted
 
 # Configuration notes:
 #
@@ -406,3 +411,21 @@ spec:
 #   - Old 'apiKeys' configuration still works without auth section
 #   - Static keys can coexist with database tokens
 #   - No breaking changes to existing deployments
+#
+# Admin Features:
+#   - First user to authenticate becomes admin automatically
+#   - Admins can:
+#     * View all users and their usage statistics
+#     * Promote other users to admin
+#     * View system-wide analytics
+#     * Access detailed request logs for all users
+#   - Regular users can:
+#     * View their own analytics and usage
+#     * Create and manage their own API tokens
+#     * Access configuration instructions
+#
+# Analytics:
+#   - Detailed request logs are kept for the configured retention period
+#   - Old logs are automatically aggregated into monthly summaries
+#   - Track: tokens used, requests made, models used, providers, timestamps
+#   - Per-user and system-wide analytics available

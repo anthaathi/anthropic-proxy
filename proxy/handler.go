@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"anthropic-proxy/analytics"
+	"anthropic-proxy/auth"
 	"anthropic-proxy/logger"
 	"anthropic-proxy/metrics"
 	"anthropic-proxy/provider"
@@ -24,10 +26,11 @@ type Handler struct {
 	retryConfig   *retry.Config
 	retrySameProvider bool
 	requestLogger *requestlog.RequestLogger
+	analyticsService *analytics.Service
 }
 
 // NewHandler creates a new proxy handler
-func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, retryConfig *retry.Config, retrySameProvider bool, requestLogger *requestlog.RequestLogger) *Handler {
+func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, retryConfig *retry.Config, retrySameProvider bool, requestLogger *requestlog.RequestLogger, analyticsService *analytics.Service) *Handler {
 	return &Handler{
 		fallbackMgr:   fallbackMgr,
 		tracker:       tracker,
@@ -35,6 +38,7 @@ func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, e
 		retryConfig:   retryConfig,
 		retrySameProvider: retrySameProvider,
 		requestLogger: requestLogger,
+		analyticsService: analyticsService,
 	}
 }
 
@@ -250,25 +254,40 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 	}
 
 	// Extract token count and record metrics
-	tokens := 0
+	inputTokens := 0
+	outputTokens := 0
+	totalTokens := 0
 	var responseData map[string]interface{}
 	if err := json.Unmarshal(finalResponseBody, &responseData); err == nil {
-		tokens = extractTokenCount(responseData)
-		h.tracker.RecordRequest(prov.Name, choice.ActualModel, tokens, duration)
+		inputTokens, outputTokens, totalTokens = extractDetailedTokenCount(responseData)
+		h.tracker.RecordRequest(prov.Name, choice.ActualModel, totalTokens, duration)
 		logger.Debug("Request succeeded with provider",
 			"provider", prov.Name,
-			"tokens", tokens,
+			"tokens", totalTokens,
 			"duration", duration.Seconds(),
-			"tps", float64(tokens)/duration.Seconds())
+			"tps", float64(totalTokens)/duration.Seconds())
 	}
 
 	// Record success
 	h.errorTracker.RecordSuccess(prov.Name, choice.ActualModel)
 
+	// Record analytics if user tracking is enabled
+	if h.analyticsService != nil {
+		userID, hasUser := auth.GetUserID(c)
+		if hasUser {
+			tokenID, _ := auth.GetTokenID(c)
+			var tokenIDPtr *uint
+			if tokenID > 0 {
+				tokenIDPtr = &tokenID
+			}
+			h.analyticsService.RecordRequest(userID, tokenIDPtr, modelName, prov.Name, inputTokens, outputTokens, duration, "success", "")
+		}
+	}
+
 	// Log successful response
 	if h.requestLogger != nil {
 		respHeaders := extractHeaders(resp.Header)
-		h.requestLogger.LogResponse(prov.Name, modelName, resp.StatusCode, respHeaders, finalResponseBody, duration, tokens, attemptNumber, true, "", false)
+		h.requestLogger.LogResponse(prov.Name, modelName, resp.StatusCode, respHeaders, finalResponseBody, duration, totalTokens, attemptNumber, true, "", false)
 	}
 
 	// Copy response headers
@@ -294,6 +313,33 @@ func extractTokenCount(response map[string]interface{}) int {
 		}
 	}
 	return 0
+}
+
+// extractDetailedTokenCount extracts detailed token counts from response
+func extractDetailedTokenCount(response map[string]interface{}) (inputTokens, outputTokens, totalTokens int) {
+	if usage, ok := response["usage"].(map[string]interface{}); ok {
+		// Anthropic format
+		if input, ok := usage["input_tokens"].(float64); ok {
+			inputTokens = int(input)
+		}
+		if output, ok := usage["output_tokens"].(float64); ok {
+			outputTokens = int(output)
+		}
+		// OpenAI format fallback
+		if prompt, ok := usage["prompt_tokens"].(float64); ok {
+			inputTokens = int(prompt)
+		}
+		if completion, ok := usage["completion_tokens"].(float64); ok {
+			outputTokens = int(completion)
+		}
+		// Calculate total
+		if total, ok := usage["total_tokens"].(float64); ok {
+			totalTokens = int(total)
+		} else {
+			totalTokens = inputTokens + outputTokens
+		}
+	}
+	return
 }
 
 // extractHeaders converts http.Header to a simple map[string]string

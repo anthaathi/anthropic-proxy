@@ -1,6 +1,7 @@
 package main
 
 import (
+	"anthropic-proxy/analytics"
 	"anthropic-proxy/api"
 	"anthropic-proxy/auth"
 	"anthropic-proxy/config"
@@ -98,6 +99,8 @@ func main() {
 	var oidcClient *auth.OIDCClient
 	var sessionManager *auth.SessionManager
 	var tokenManager *auth.TokenManager
+	var analyticsService *analytics.Service
+	var cleanupJob *analytics.CleanupJob
 
 	if cfg.Spec.Auth != nil {
 		// Merge old APIKeys with new StaticKeys for backward compatibility
@@ -132,6 +135,16 @@ func main() {
 					tokenManager = auth.NewTokenManager(dbRepo)
 					authService.SetTokenManager(tokenManager)
 					logger.Info("Database authentication enabled")
+
+					// Initialize analytics service
+					retentionDays := cfg.Spec.Auth.GetDataRetentionDays()
+					analyticsService = analytics.NewService(dbRepo, retentionDays)
+					logger.Info("Analytics service initialized", "retention_days", retentionDays)
+
+					// Start cleanup job (runs daily)
+					cleanupJob = analytics.NewCleanupJob(analyticsService, 24*time.Hour)
+					cleanupJob.Start()
+					logger.Info("Analytics cleanup job started")
 				}
 			}
 		}
@@ -211,17 +224,21 @@ func main() {
 	defer benchmarker.Stop()
 
 	// Initialize handlers (needed for both modes)
-	proxyHandler := proxy.NewHandler(fallbackMgr, tracker, errorTracker, retryConfig, retrySameProvider, reqLogger)
+	proxyHandler := proxy.NewHandler(fallbackMgr, tracker, errorTracker, retryConfig, retrySameProvider, reqLogger, analyticsService)
 	modelsHandler := proxy.NewModelsHandler(modelRegistry)
 	healthHandler := proxy.NewHealthHandler(providerMgr, tracker, errorTracker)
 	countTokensHandler := proxy.NewCountTokensHandler(fallbackMgr)
 
 	// Start HTTP server in background
-	srv := startHTTPServer(cfg, proxyHandler, modelsHandler, healthHandler, countTokensHandler, authService, oidcClient, sessionManager, dbRepo, tokenManager)
+	srv := startHTTPServer(cfg, proxyHandler, modelsHandler, healthHandler, countTokensHandler, authService, oidcClient, sessionManager, dbRepo, tokenManager, analyticsService)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
+		// Stop cleanup job
+		if cleanupJob != nil {
+			cleanupJob.Stop()
+		}
 		// Close database connection
 		if db != nil {
 			db.Close()
@@ -290,10 +307,13 @@ func customRecoveryMiddleware() gin.HandlerFunc {
 }
 
 // setupAdminRoutes sets up admin UI and authentication routes
-func setupAdminRoutes(r *gin.Engine, cfg *config.Config, oidcClient *auth.OIDCClient, sessionManager *auth.SessionManager, dbRepo *database.Repository, tokenManager *auth.TokenManager) {
+func setupAdminRoutes(r *gin.Engine, cfg *config.Config, oidcClient *auth.OIDCClient, sessionManager *auth.SessionManager, dbRepo *database.Repository, tokenManager *auth.TokenManager, analyticsService *analytics.Service) {
 	// Create API handlers
 	authHandler := api.NewAuthHandler(oidcClient, sessionManager, dbRepo)
 	tokenHandler := api.NewTokenHandler(tokenManager, sessionManager, dbRepo)
+	analyticsHandler := api.NewAnalyticsHandler(analyticsService, sessionManager)
+	adminHandler := api.NewAdminHandler(analyticsService, sessionManager, dbRepo)
+	configHandler := api.NewConfigHandler(cfg, sessionManager, tokenManager)
 
 	// Auth flow endpoints (no auth required)
 	authGroup := r.Group("/auth")
@@ -355,7 +375,7 @@ func setupAdminRoutes(r *gin.Engine, cfg *config.Config, oidcClient *auth.OIDCCl
 		}
 	}
 
-	// API endpoints for token management (requires session auth)
+	// API endpoints for token management and analytics (requires session auth)
 	apiAuthGroup := r.Group("/api/auth")
 	apiAuthGroup.Use(sessionManager.RequireAuth())
 	{
@@ -364,6 +384,20 @@ func setupAdminRoutes(r *gin.Engine, cfg *config.Config, oidcClient *auth.OIDCCl
 		apiAuthGroup.POST("/tokens", tokenHandler.HandleCreateToken)
 		apiAuthGroup.DELETE("/tokens/:id", tokenHandler.HandleRevokeToken)
 		apiAuthGroup.PUT("/tokens/:id", tokenHandler.HandleUpdateToken)
+		apiAuthGroup.GET("/analytics", analyticsHandler.HandleGetUserAnalytics)
+		apiAuthGroup.GET("/config", configHandler.HandleGetConfig)
+	}
+
+	// Admin API endpoints (requires admin privileges)
+	apiAdminGroup := r.Group("/api/admin")
+	apiAdminGroup.Use(sessionManager.RequireAuth())
+	apiAdminGroup.Use(adminHandler.RequireAdmin())
+	{
+		apiAdminGroup.GET("/users", adminHandler.HandleGetAllUsers)
+		apiAdminGroup.GET("/analytics", adminHandler.HandleGetSystemAnalytics)
+		apiAdminGroup.GET("/users/:id/analytics", adminHandler.HandleGetUserAnalytics)
+		apiAdminGroup.POST("/users/:id/promote", adminHandler.HandlePromoteUser)
+		apiAdminGroup.POST("/users/:id/demote", adminHandler.HandleDemoteUser)
 	}
 
 	logger.Info("Admin UI and authentication routes configured",
@@ -371,7 +405,7 @@ func setupAdminRoutes(r *gin.Engine, cfg *config.Config, oidcClient *auth.OIDCCl
 		"loginURL", adminPath+"/login")
 }
 
-func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHandler *proxy.ModelsHandler, healthHandler *proxy.HealthHandler, countTokensHandler *proxy.CountTokensHandler, authService *auth.Service, oidcClient *auth.OIDCClient, sessionManager *auth.SessionManager, dbRepo *database.Repository, tokenManager *auth.TokenManager) *http.Server {
+func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHandler *proxy.ModelsHandler, healthHandler *proxy.HealthHandler, countTokensHandler *proxy.CountTokensHandler, authService *auth.Service, oidcClient *auth.OIDCClient, sessionManager *auth.SessionManager, dbRepo *database.Repository, tokenManager *auth.TokenManager, analyticsService *analytics.Service) *http.Server {
 	// Setup Gin router
 	gin.SetMode(gin.ReleaseMode)
 
@@ -388,7 +422,7 @@ func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHand
 
 	// Setup admin UI and auth routes if configured
 	if cfg.Spec.Auth != nil && cfg.Spec.Auth.AdminUI.Enabled && oidcClient != nil && sessionManager != nil && dbRepo != nil {
-		setupAdminRoutes(r, cfg, oidcClient, sessionManager, dbRepo, tokenManager)
+		setupAdminRoutes(r, cfg, oidcClient, sessionManager, dbRepo, tokenManager, analyticsService)
 	}
 
 	// API routes (with authentication)

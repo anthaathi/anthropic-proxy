@@ -105,8 +105,8 @@ func (s *Service) createMiddleware() gin.HandlerFunc {
 		}
 
 		// Extract token from "Bearer <token>"
-		token := extractBearerToken(authHeader)
-		if token == "" {
+		tokenString := extractBearerToken(authHeader)
+		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{
 					"type":    "authentication_error",
@@ -117,19 +117,56 @@ func (s *Service) createMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Validate token using the service
-		if !s.ValidateKey(token) {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": gin.H{
-					"type":    "authentication_error",
-					"message": "invalid API key",
-				},
-			})
-			c.Abort()
+		// Check if it's a static key first
+		s.mu.RLock()
+		isStaticKey := s.keyMap[tokenString]
+		s.mu.RUnlock()
+
+		if isStaticKey {
+			// Static key - no user tracking
+			c.Next()
 			return
 		}
 
-		// Token is valid, continue
-		c.Next()
+		// Try database token
+		if s.tokenManager != nil {
+			dbToken, err := s.tokenManager.ValidateToken(tokenString)
+			if err == nil {
+				// Database token is valid - store user and token info in context
+				c.Set("user_id", dbToken.UserID)
+				c.Set("token_id", dbToken.ID)
+				c.Next()
+				return
+			}
+		}
+
+		// Token not found in static keys or database
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": gin.H{
+				"type":    "authentication_error",
+				"message": "invalid API key",
+			},
+		})
+		c.Abort()
 	}
+}
+
+// GetUserID extracts user ID from gin context
+func GetUserID(c *gin.Context) (uint, bool) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return 0, false
+	}
+	id, ok := userID.(uint)
+	return id, ok
+}
+
+// GetTokenID extracts token ID from gin context
+func GetTokenID(c *gin.Context) (uint, bool) {
+	tokenID, exists := c.Get("token_id")
+	if !exists {
+		return 0, false
+	}
+	id, ok := tokenID.(uint)
+	return id, ok
 }

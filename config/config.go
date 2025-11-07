@@ -69,6 +69,9 @@ type AuthConfig struct {
 
 	// Admin UI configuration
 	AdminUI AdminUIConfig `yaml:"adminUI"`
+
+	// Analytics configuration
+	DataRetentionDays int `yaml:"dataRetentionDays"` // How many days to keep detailed request logs (default: 30)
 }
 
 // DatabaseConfig represents database configuration
@@ -105,6 +108,7 @@ type AdminUIConfig struct {
 	Path          string `yaml:"path"`          // Default: "/admin"
 	SessionSecret string `yaml:"sessionSecret"` // Secret key for session encryption
 	SessionMaxAge int    `yaml:"sessionMaxAge"` // Session max age in seconds (default: 86400 = 24h)
+	BaseURL       string `yaml:"baseUrl"`       // Base URL for the proxy (for config display)
 }
 
 // GetDefaultScopes returns default OpenID scopes if none are specified
@@ -129,4 +133,12 @@ func (a *AdminUIConfig) GetSessionMaxAge() int {
 		return 86400 // 24 hours
 	}
 	return a.SessionMaxAge
+}
+
+// GetDataRetentionDays returns data retention days with default
+func (a *AuthConfig) GetDataRetentionDays() int {
+	if a.DataRetentionDays <= 0 {
+		return 30 // 30 days default
+	}
+	return a.DataRetentionDays
 }

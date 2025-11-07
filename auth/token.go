@@ -101,7 +101,8 @@ func (tm *TokenManager) GenerateToken(userID uint, name string, expiresInDays in
 // ValidateToken validates a token string and returns the associated token record
 func (tm *TokenManager) ValidateToken(tokenString string) (*database.Token, error) {
 	// Parse token format: sk-{prefix}-{secret}
-	parts := strings.Split(tokenString, "-")
+	// Use SplitN to limit splits since prefix/secret may contain hyphens (base64 URL encoding)
+	parts := strings.SplitN(tokenString, "-", 3)
 	if len(parts) != 3 || parts[0] != tokenPrefix {
 		return nil, ErrInvalidToken
 	}

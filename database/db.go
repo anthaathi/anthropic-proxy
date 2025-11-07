@@ -94,6 +94,8 @@ func (db *DB) AutoMigrate() error {
 	err := db.DB.AutoMigrate(
 		&User{},
 		&Token{},
+		&RequestLog{},
+		&UsageSummary{},
 	)
 
 	if err != nil {
