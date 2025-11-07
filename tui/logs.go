@@ -161,7 +161,7 @@ func (p *LogsPage) SetupInputCapture(switchPage func(string)) {
 
 		switch event.Key() {
 		case tcell.KeyTab:
-			switchPage("config")
+			switchPage("benchmark")
 			return nil
 		case tcell.KeyBacktab:
 			switchPage("overview")

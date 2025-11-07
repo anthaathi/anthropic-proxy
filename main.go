@@ -8,6 +8,7 @@ import (
 	"anthropic-proxy/model"
 	"anthropic-proxy/provider"
 	"anthropic-proxy/proxy"
+	"anthropic-proxy/requestlog"
 	"anthropic-proxy/retry"
 	"anthropic-proxy/router"
 	"anthropic-proxy/tui"
@@ -27,6 +28,9 @@ import (
 func main() {
 	// Parse command-line flags
 	tuiMode := flag.Bool("tui", false, "Run in TUI mode")
+	watch := flag.Bool("watch", false, "Watch for config file changes and prompt to reload")
+	logFile := flag.String("log-file", "", "Path to file for logging all requests and responses")
+	tpsThreshold := flag.Float64("tps-threshold", 40.0, "Minimum TPS threshold for provider selection")
 	flag.Parse()
 
 	// Initialize logger
@@ -75,10 +79,26 @@ func main() {
 	providerMgr := provider.NewManager()
 	providerMgr.Load(cfg.Spec.Providers)
 
+	// Create dynamic auth service
+	authService := auth.NewService()
+	authService.UpdateKeys(cfg.Spec.APIKeys)
+
 	tracker := metrics.NewTracker()
 	errorTracker := metrics.NewErrorTracker()
 
-	selector := router.NewSelector(modelRegistry, providerMgr, tracker)
+	// Initialize request logger if --log-file flag is provided
+	var reqLogger *requestlog.RequestLogger
+	if *logFile != "" {
+		var err error
+		reqLogger, err = requestlog.NewRequestLogger(*logFile)
+		if err != nil {
+			log.Fatalf("Failed to initialize request logger: %v", err)
+		}
+		logger.Info("Request logging enabled", "file", *logFile)
+		defer reqLogger.Close()
+	}
+
+	selector := router.NewSelector(modelRegistry, providerMgr, tracker, *tpsThreshold)
 	fallbackMgr := router.NewFallbackManager(selector)
 
 	// Initialize retry configuration
@@ -103,33 +123,70 @@ func main() {
 	}
 
 	// Start benchmark job
-	benchmarker := metrics.NewBenchmarker(providerMgr, tracker, cfg.Spec.Models)
+	benchmarker := metrics.NewBenchmarker(providerMgr, tracker, cfg.Spec.Models, reqLogger)
 	benchmarker.Start()
 	defer benchmarker.Stop()
 
 	// Initialize handlers (needed for both modes)
-	proxyHandler := proxy.NewHandler(fallbackMgr, tracker, errorTracker, retryConfig)
+	proxyHandler := proxy.NewHandler(fallbackMgr, tracker, errorTracker, retryConfig, reqLogger)
 	modelsHandler := proxy.NewModelsHandler(modelRegistry)
 	healthHandler := proxy.NewHealthHandler(providerMgr, tracker, errorTracker)
 	countTokensHandler := proxy.NewCountTokensHandler(fallbackMgr)
 
 	// Start HTTP server in background
-	srv := startHTTPServer(cfg, proxyHandler, modelsHandler, healthHandler, countTokensHandler)
+	srv := startHTTPServer(cfg, proxyHandler, modelsHandler, healthHandler, countTokensHandler, authService)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
 	}()
 
+	// Setup config reloader if enabled (for non-TUI mode)
+	var configReloader *config.Reloader
+	var configUpdater *config.ConfigUpdater
+	if *watch && !*tuiMode {
+		// Create config updater
+		configUpdater = config.NewConfigUpdater(providerMgr, modelRegistry, authService)
+		configUpdater.SetCurrentConfig(cfg)
+
+		// Create reloader with CLI confirmation callback
+		rel, err := config.NewReloader(configPath, func() error {
+			logger.Info("Config file changed, checking for updates...")
+			// In server mode, use CLI confirmation
+			return configUpdater.TryReload(configPath)
+		})
+		if err != nil {
+			log.Fatalf("Failed to create config reloader: %v", err)
+		}
+
+		configReloader = rel
+
+		// Start watching for config changes
+		if err := configReloader.Start(); err != nil {
+			log.Fatalf("Failed to start config reloader: %v", err)
+		}
+
+		logger.Info("Config watching enabled", "file", configPath)
+		defer configReloader.Stop()
+	}
+
 	// Branch based on mode
 	if *tuiMode {
-		runTUIMode(cfg, tracker, errorTracker, providerMgr, logLevel)
+		// In TUI mode, enable config watching by default
+		if !*watch {
+			*watch = true
+		}
+		// TUI mode will set up its own config reloader with proper modal callback
+		runTUIMode(cfg, tracker, errorTracker, providerMgr, modelRegistry, authService, benchmarker, logLevel, configPath, *watch)
 	} else {
+		if *watch {
+			logger.Info("Config watching enabled", "Press Ctrl+C to exit")
+		}
 		runServerMode()
 	}
 }
 
-func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHandler *proxy.ModelsHandler, healthHandler *proxy.HealthHandler, countTokensHandler *proxy.CountTokensHandler) *http.Server {
+func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHandler *proxy.ModelsHandler, healthHandler *proxy.HealthHandler, countTokensHandler *proxy.CountTokensHandler, authService *auth.Service) *http.Server {
 	// Setup Gin router
 	gin.SetMode(gin.ReleaseMode)
 
@@ -146,7 +203,7 @@ func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHand
 
 	// API routes (with authentication)
 	api := r.Group("/v1")
-	api.Use(auth.Middleware(cfg.Spec.APIKeys))
+	api.Use(authService.Middleware())
 	{
 		api.POST("/messages", proxyHandler.HandleMessages)
 		api.POST("/messages/count_tokens", countTokensHandler.HandleCountTokens)
@@ -178,9 +235,53 @@ func startHTTPServer(cfg *config.Config, proxyHandler *proxy.Handler, modelsHand
 	return srv
 }
 
-func runTUIMode(cfg *config.Config, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, providerMgr *provider.Manager, logLevel string) {
+func runTUIMode(cfg *config.Config, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, providerMgr *provider.Manager, modelRegistry *model.Registry, authService *auth.Service, benchmarker *metrics.Benchmarker, logLevel string, configPath string, watch bool) {
 	// Create TUI app
-	tuiApp := tui.NewApp(tracker, errorTracker, providerMgr, cfg)
+	tuiApp := tui.NewApp(tracker, errorTracker, providerMgr, cfg, benchmarker)
+
+	// Set up config watching with TUI modal callback if enabled
+	if watch {
+		// Create config updater
+		configUpdater := config.NewConfigUpdater(providerMgr, modelRegistry, authService)
+		configUpdater.SetCurrentConfig(cfg)
+
+		// Create reloader with TUI modal callback
+		configReloader, err := config.NewReloader(configPath, func() error {
+			logger.Info("Config file changed, checking for updates...")
+
+			// Use TUI callback to show modal
+			return configUpdater.TryReloadWithCallback(configPath, func(changes []config.ConfigChange, onConfirm func(), onCancel func()) {
+				// Get the config manager from the TUI app
+				configManager := tuiApp.GetConfigManager()
+				if configManager != nil {
+					// Queue the modal to be shown on the main TUI thread
+					tuiApp.QueueUpdateDraw(func() {
+						configManager.ShowConfigReloadPrompt(changes, onConfirm, onCancel)
+					})
+				}
+			})
+		})
+
+		if err != nil {
+			log.Fatalf("Failed to create config reloader: %v", err)
+		}
+
+		// Start watching for config changes
+		if err := configReloader.Start(); err != nil {
+			log.Fatalf("Failed to start config reloader: %v", err)
+		}
+
+		// Set config reloader in TUI
+		tuiApp.SetConfigReloader(configUpdater, configReloader)
+
+		// Enable config watching in TUI to show status
+		tuiApp.SetConfigWatching(true)
+
+		logger.Info("Config watching enabled", "file", configPath)
+
+		// Make sure to stop the reloader when TUI exits
+		defer configReloader.Stop()
+	}
 
 	// Replace logger with TUI handler
 	level := slog.LevelInfo

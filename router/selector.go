@@ -18,22 +18,40 @@ type Selector struct {
 }
 
 // NewSelector creates a new provider selector
-func NewSelector(modelRegistry *model.Registry, providerMgr *provider.Manager, tracker *metrics.Tracker) *Selector {
+func NewSelector(modelRegistry *model.Registry, providerMgr *provider.Manager, tracker *metrics.Tracker, tpsThreshold float64) *Selector {
 	return &Selector{
 		modelRegistry: modelRegistry,
 		providerMgr:   providerMgr,
 		tracker:       tracker,
-		tpsThreshold:  40.0, // Minimum TPS requirement
+		tpsThreshold:  tpsThreshold,
 	}
 }
 
 // SelectProviders returns an ordered list of providers to try for a given model
-func (s *Selector) SelectProviders(requestedModel string) ([]*ProviderChoice, error) {
+func (s *Selector) SelectProviders(requestedModel string, thinkingEnabled bool) ([]*ProviderChoice, error) {
 	// Find models matching the requested name (exact or alias match)
 	matchingModels := s.modelRegistry.FindMatching(requestedModel)
 
 	if len(matchingModels) == 0 {
 		return nil, ErrNoModelFound
+	}
+
+	// Filter by thinking capability if thinking is enabled in the request
+	if thinkingEnabled {
+		var thinkingModels []*config.Model
+		for _, modelConfig := range matchingModels {
+			if modelConfig.Thinking {
+				thinkingModels = append(thinkingModels, modelConfig)
+			}
+		}
+
+		// Use thinking-enabled models if available, otherwise fall back to all models
+		if len(thinkingModels) > 0 {
+			matchingModels = thinkingModels
+			logger.Debug("Filtered to thinking-enabled models", "count", len(thinkingModels))
+		} else {
+			logger.Warn("No thinking-enabled models available, using all matching models")
+		}
 	}
 
 	// Build list of ALL provider choices (without TPS filtering initially)

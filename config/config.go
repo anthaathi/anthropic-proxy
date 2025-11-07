@@ -15,8 +15,17 @@ type Spec struct {
 
 // Provider represents a backend provider configuration
 type Provider struct {
+	Type     string `yaml:"type"`     // "anthropic" or "openai"
 	Endpoint string `yaml:"endpoint"`
 	APIKey   string `yaml:"apiKey"`
+}
+
+// GetType returns the provider type, defaulting to "anthropic" if not set
+func (p *Provider) GetType() string {
+	if p.Type == "" {
+		return "anthropic"
+	}
+	return p.Type
 }
 
 // Model represents a model configuration
@@ -26,6 +35,7 @@ type Model struct {
 	Context  int    `yaml:"context"`
 	Provider string `yaml:"provider"`
 	Weight   int    `yaml:"weight"`
+	Thinking bool   `yaml:"thinking"`
 }
 
 // GetWeight returns the weight with a default of 1 if not set

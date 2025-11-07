@@ -4,8 +4,10 @@ import (
 	"anthropic-proxy/logger"
 	"anthropic-proxy/metrics"
 	"anthropic-proxy/provider"
+	"anthropic-proxy/requestlog"
 	"anthropic-proxy/retry"
 	"anthropic-proxy/router"
+	"anthropic-proxy/transform"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,19 +18,21 @@ import (
 
 // Handler handles proxy requests
 type Handler struct {
-	fallbackMgr  *router.FallbackManager
-	tracker      *metrics.Tracker
-	errorTracker *metrics.ErrorTracker
-	retryConfig  *retry.Config
+	fallbackMgr   *router.FallbackManager
+	tracker       *metrics.Tracker
+	errorTracker  *metrics.ErrorTracker
+	retryConfig   *retry.Config
+	requestLogger *requestlog.RequestLogger
 }
 
 // NewHandler creates a new proxy handler
-func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, retryConfig *retry.Config) *Handler {
+func NewHandler(fallbackMgr *router.FallbackManager, tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, retryConfig *retry.Config, requestLogger *requestlog.RequestLogger) *Handler {
 	return &Handler{
-		fallbackMgr:  fallbackMgr,
-		tracker:      tracker,
-		errorTracker: errorTracker,
-		retryConfig:  retryConfig,
+		fallbackMgr:   fallbackMgr,
+		tracker:       tracker,
+		errorTracker:  errorTracker,
+		retryConfig:   retryConfig,
+		requestLogger: requestLogger,
 	}
 }
 
@@ -61,8 +65,16 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 		isStreaming = stream
 	}
 
+	// Check if thinking is enabled in the request
+	thinkingEnabled := false
+	if thinking, ok := requestBody["thinking"].(map[string]interface{}); ok {
+		if thinkingType, ok := thinking["type"].(string); ok && thinkingType == "enabled" {
+			thinkingEnabled = true
+		}
+	}
+
 	// Get ordered list of providers to try
-	providerChoices, err := h.fallbackMgr.GetOrderedProviders(modelName)
+	providerChoices, err := h.fallbackMgr.GetOrderedProviders(modelName, thinkingEnabled)
 	if err != nil {
 		logger.Error("Error selecting providers for model",
 			"model", modelName,
@@ -81,7 +93,10 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 
 	// Try each provider in order
 	var lastError *ProxyError
+	attemptNumber := 0
 	for _, choice := range providerChoices {
+		attemptNumber++
+
 		// Update request body with the actual model name for this provider
 		requestBody["model"] = choice.ActualModel
 		updatedBody, err := json.Marshal(requestBody)
@@ -100,14 +115,14 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 
 		if isStreaming {
 			// Handle streaming request
-			success := h.handleStreamingRequest(c, choice.Provider, updatedBody, headers, choice, startTime)
+			success := h.handleStreamingRequest(c, choice.Provider, updatedBody, headers, choice, startTime, attemptNumber, modelName)
 			if success {
 				return // Success, response already sent
 			}
 			// Failed, try next provider
 		} else {
 			// Handle non-streaming request
-			success, proxyErr := h.handleNonStreamingRequest(c, choice.Provider, updatedBody, headers, choice, startTime)
+			success, proxyErr := h.handleNonStreamingRequest(c, choice.Provider, updatedBody, headers, choice, startTime, attemptNumber, modelName)
 			if success {
 				return // Success, response already sent
 			}
@@ -130,7 +145,12 @@ func (h *Handler) HandleMessages(c *gin.Context) {
 
 // handleNonStreamingRequest handles a non-streaming request to a provider
 func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provider, body []byte,
-	headers map[string]string, choice *router.ProviderChoice, startTime time.Time) (bool, *ProxyError) {
+	headers map[string]string, choice *router.ProviderChoice, startTime time.Time, attemptNumber int, modelName string) (bool, *ProxyError) {
+
+	// Log request if request logger is enabled
+	if h.requestLogger != nil {
+		h.requestLogger.LogRequest(prov.Name, modelName, "POST", "/v1/messages", headers, body, attemptNumber, false)
+	}
 
 	resp, err := prov.Client.ProxyRequestWithRetry(c.Request.Context(), "POST", "/v1/messages", body, headers, h.retryConfig, prov.Name)
 	duration := time.Since(startTime)
@@ -140,6 +160,12 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 		proxyErr := ClassifyError(0, err, prov.Name)
 		LogError(proxyErr)
 		h.errorTracker.RecordError(prov.Name, 0)
+
+		// Log failed response
+		if h.requestLogger != nil {
+			h.requestLogger.LogResponse(prov.Name, modelName, 0, nil, nil, duration, 0, attemptNumber, false, proxyErr.Message, false)
+		}
+
 		return false, proxyErr
 	}
 	defer resp.Body.Close()
@@ -149,6 +175,13 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 		proxyErr := ClassifyError(resp.StatusCode, nil, prov.Name)
 		LogError(proxyErr)
 		h.errorTracker.RecordError(prov.Name, resp.StatusCode)
+
+		// Log failed response with status code
+		if h.requestLogger != nil {
+			respHeaders := extractHeaders(resp.Header)
+			h.requestLogger.LogResponse(prov.Name, modelName, resp.StatusCode, respHeaders, nil, duration, 0, attemptNumber, false, proxyErr.Message, false)
+		}
+
 		return false, proxyErr
 	}
 
@@ -158,13 +191,39 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 		logger.Error("Error reading response from provider",
 			"provider", prov.Name,
 			"error", err.Error())
+
+		// Log failed response
+		if h.requestLogger != nil {
+			h.requestLogger.LogResponse(prov.Name, modelName, resp.StatusCode, nil, nil, duration, 0, attemptNumber, false, err.Error(), false)
+		}
+
 		return false, ClassifyError(0, err, prov.Name)
 	}
 
+	// Convert OpenAI response to Anthropic format if needed
+	finalResponseBody := responseBody
+	if prov.Type == transform.ProviderTypeOpenAI {
+		convertedBody, err := transform.OpenAIToAnthropicResponse(responseBody, modelName)
+		if err != nil {
+			logger.Error("Failed to convert OpenAI response to Anthropic format",
+				"provider", prov.Name,
+				"error", err.Error())
+
+			// Log failed response
+			if h.requestLogger != nil {
+				h.requestLogger.LogResponse(prov.Name, modelName, resp.StatusCode, nil, nil, duration, 0, attemptNumber, false, err.Error(), false)
+			}
+
+			return false, ClassifyError(0, err, prov.Name)
+		}
+		finalResponseBody = convertedBody
+	}
+
 	// Extract token count and record metrics
+	tokens := 0
 	var responseData map[string]interface{}
-	if err := json.Unmarshal(responseBody, &responseData); err == nil {
-		tokens := extractTokenCount(responseData)
+	if err := json.Unmarshal(finalResponseBody, &responseData); err == nil {
+		tokens = extractTokenCount(responseData)
 		h.tracker.RecordRequest(prov.Name, choice.ActualModel, tokens, duration)
 		logger.Debug("Request succeeded with provider",
 			"provider", prov.Name,
@@ -176,6 +235,12 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 	// Record success
 	h.errorTracker.RecordSuccess(prov.Name)
 
+	// Log successful response
+	if h.requestLogger != nil {
+		respHeaders := extractHeaders(resp.Header)
+		h.requestLogger.LogResponse(prov.Name, modelName, resp.StatusCode, respHeaders, finalResponseBody, duration, tokens, attemptNumber, true, "", false)
+	}
+
 	// Copy response headers
 	for key, values := range resp.Header {
 		if len(values) > 0 {
@@ -184,7 +249,7 @@ func (h *Handler) handleNonStreamingRequest(c *gin.Context, prov *provider.Provi
 	}
 
 	// Send response
-	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
+	c.Data(resp.StatusCode, "application/json", finalResponseBody)
 	return true, nil
 }
 
@@ -199,4 +264,15 @@ func extractTokenCount(response map[string]interface{}) int {
 		}
 	}
 	return 0
+}
+
+// extractHeaders converts http.Header to a simple map[string]string
+func extractHeaders(headers http.Header) map[string]string {
+	result := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if len(values) > 0 {
+			result[key] = values[0]
+		}
+	}
+	return result
 }

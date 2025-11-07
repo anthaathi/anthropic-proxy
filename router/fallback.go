@@ -28,8 +28,8 @@ func NewFallbackManager(selector *Selector) *FallbackManager {
 }
 
 // GetOrderedProviders returns an ordered list of providers to try
-func (f *FallbackManager) GetOrderedProviders(requestedModel string) ([]*ProviderChoice, error) {
-	return f.selector.SelectProviders(requestedModel)
+func (f *FallbackManager) GetOrderedProviders(requestedModel string, thinkingEnabled bool) ([]*ProviderChoice, error) {
+	return f.selector.SelectProviders(requestedModel, thinkingEnabled)
 }
 
 // ShouldRetry determines if we should retry with the next provider

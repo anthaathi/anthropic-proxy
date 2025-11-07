@@ -45,8 +45,16 @@ func (h *CountTokensHandler) HandleCountTokens(c *gin.Context) {
 		return
 	}
 
+	// Check if thinking is enabled in the request
+	thinkingEnabled := false
+	if thinking, ok := requestBody["thinking"].(map[string]interface{}); ok {
+		if thinkingType, ok := thinking["type"].(string); ok && thinkingType == "enabled" {
+			thinkingEnabled = true
+		}
+	}
+
 	// Get ordered list of providers to try
-	providerChoices, err := h.fallbackMgr.GetOrderedProviders(modelName)
+	providerChoices, err := h.fallbackMgr.GetOrderedProviders(modelName, thinkingEnabled)
 	if err != nil {
 		logger.Error("Error selecting providers for model",
 			"model", modelName,

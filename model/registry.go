@@ -102,3 +102,26 @@ func (r *Registry) String() string {
 	defer r.mu.RUnlock()
 	return fmt.Sprintf("Registry{models: %d}", len(r.models))
 }
+
+// UpdateModels updates the model registry with new configurations
+func (r *Registry) UpdateModels(newModels []config.Model) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Create a new slice of models
+	updatedModels := make([]*config.Model, 0, len(newModels))
+
+	for i := range newModels {
+		model := &newModels[i]
+		updatedModels = append(updatedModels, model)
+		logger.Debug("Updated model",
+			"name", model.Name,
+			"alias", model.Alias,
+			"provider", model.Provider)
+	}
+
+	// Replace the entire models slice atomically
+	r.models = updatedModels
+
+	logger.Info("Model registry updated", "total", len(r.models))
+}

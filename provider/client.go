@@ -3,6 +3,7 @@ package provider
 import (
 	"anthropic-proxy/logger"
 	"anthropic-proxy/retry"
+	"anthropic-proxy/transform"
 	"bytes"
 	"context"
 	"fmt"
@@ -13,16 +14,18 @@ import (
 
 // Client handles HTTP communication with a provider
 type Client struct {
-	endpoint   string
-	apiKey     string
-	httpClient *http.Client
+	endpoint     string
+	apiKey       string
+	providerType string
+	httpClient   *http.Client
 }
 
 // NewClient creates a new provider client
-func NewClient(endpoint, apiKey string) *Client {
+func NewClient(endpoint, apiKey, providerType string) *Client {
 	return &Client{
-		endpoint: endpoint,
-		apiKey:   apiKey,
+		endpoint:     endpoint,
+		apiKey:       apiKey,
+		providerType: providerType,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second, // 2 minutes for long streaming requests
 			Transport: &http.Transport{
@@ -34,23 +37,52 @@ func NewClient(endpoint, apiKey string) *Client {
 	}
 }
 
+// GetProviderType returns the provider type
+func (c *Client) GetProviderType() string {
+	return c.providerType
+}
+
 // ProxyRequest forwards a request to the provider
 func (c *Client) ProxyRequest(ctx context.Context, method, path string, body []byte, headers map[string]string) (*http.Response, error) {
-	url := c.endpoint + path
+	// Convert request format if needed for OpenAI providers
+	requestBody := body
+	requestPath := path
 
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if c.providerType == transform.ProviderTypeOpenAI {
+		// Convert Anthropic request to OpenAI format
+		convertedBody, err := transform.AnthropicToOpenAIRequest(body)
+		if err != nil {
+			logger.Error("Failed to convert Anthropic request to OpenAI format", "error", err.Error())
+			return nil, fmt.Errorf("failed to convert request format: %w", err)
+		}
+		requestBody = convertedBody
+		// OpenAI uses /v1/chat/completions instead of /v1/messages
+		requestPath = "/v1/chat/completions"
+	}
+
+	url := c.endpoint + requestPath
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set authorization header with provider's API key
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	// Set authorization header based on provider type
+	if c.providerType == transform.ProviderTypeOpenAI {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	} else {
+		// Anthropic
+		req.Header.Set("x-api-key", c.apiKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	// Copy other headers from the original request
 	for key, value := range headers {
-		// Don't override Authorization
-		if key != "Authorization" {
+		// Don't override Authorization, x-api-key, anthropic-version, or Accept-Encoding
+		// Skip Accept-Encoding to prevent compressed responses that we can't decompress
+		if key != "Authorization" && key != "x-api-key" && key != "anthropic-version" && key != "Accept-Encoding" {
 			req.Header.Set(key, value)
 		}
 	}

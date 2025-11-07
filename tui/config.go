@@ -128,7 +128,7 @@ func (p *ConfigPage) SetupInputCapture(switchPage func(string)) {
 			switchPage("overview")
 			return nil
 		case tcell.KeyBacktab:
-			switchPage("logs")
+			switchPage("benchmark") // Go to benchmark on backtab
 			return nil
 		}
 		return event

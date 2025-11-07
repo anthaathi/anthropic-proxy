@@ -52,6 +52,12 @@ func validateProvider(name string, p Provider) error {
 		return fmt.Errorf("provider name cannot be empty")
 	}
 
+	// Validate provider type
+	providerType := p.GetType()
+	if providerType != "anthropic" && providerType != "openai" {
+		return fmt.Errorf("provider %s: type must be either 'anthropic' or 'openai', got '%s'", name, providerType)
+	}
+
 	if p.Endpoint == "" {
 		return fmt.Errorf("provider %s: endpoint cannot be empty", name)
 	}

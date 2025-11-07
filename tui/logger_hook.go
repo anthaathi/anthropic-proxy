@@ -55,6 +55,30 @@ func (lb *LogBuffer) GetAll() []LogEntry {
 	return result
 }
 
+// AddLog adds a log message with level for quick logging
+func (lb *LogBuffer) AddLog(message string, level string) {
+	slogLevel := slog.LevelInfo
+	switch level {
+	case "DEBUG":
+		slogLevel = slog.LevelDebug
+	case "WARN", "WARNING":
+		slogLevel = slog.LevelWarn
+	case "ERROR":
+		slogLevel = slog.LevelError
+	case "SUCCESS":
+		slogLevel = slog.LevelInfo // Use INFO for success
+	}
+
+	entry := LogEntry{
+		Timestamp: time.Now(),
+		Level:     slogLevel,
+		Message:   message,
+		Attrs:     make(map[string]interface{}),
+	}
+
+	lb.Add(entry)
+}
+
 // TUIHandler is a custom slog handler that captures logs for the TUI
 type TUIHandler struct {
 	buffer *LogBuffer

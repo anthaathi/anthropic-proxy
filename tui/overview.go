@@ -24,10 +24,12 @@ type OverviewPage struct {
 	errorTracker    *metrics.ErrorTracker
 	providerManager *provider.Manager
 	cfg             *config.Config
+	benchmarker     *metrics.Benchmarker
+	isConfigWatching bool
 }
 
 // NewOverviewPage creates a new overview page
-func NewOverviewPage(tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, providerManager *provider.Manager, cfg *config.Config) *OverviewPage {
+func NewOverviewPage(tracker *metrics.Tracker, errorTracker *metrics.ErrorTracker, providerManager *provider.Manager, cfg *config.Config, benchmarker *metrics.Benchmarker) *OverviewPage {
 	page := &OverviewPage{
 		Flex:            tview.NewFlex(),
 		metricsTable:    tview.NewTable(),
@@ -38,6 +40,7 @@ func NewOverviewPage(tracker *metrics.Tracker, errorTracker *metrics.ErrorTracke
 		errorTracker:    errorTracker,
 		providerManager: providerManager,
 		cfg:             cfg,
+		benchmarker:     benchmarker,
 	}
 
 	// Configure metrics table
@@ -104,13 +107,31 @@ func (p *OverviewPage) updateSummary() {
 		port = envPort
 	}
 
+	// Get benchmark status
+	benchmarkStatus := ""
+	if p.benchmarker != nil {
+		status := p.benchmarker.GetStatus()
+		benchmarkStatus = fmt.Sprintf(" [green]Bench:[white] %s", status.LastRunTime.Format("15:04:05"))
+		if status.IsRunning {
+			benchmarkStatus = " [yellow]Bench:[white] Running..."
+		}
+	}
+
+	// Check if config watching is enabled
+	configStatus := " [red]Config:[white] Static"
+	if p.isConfigWatching {
+		configStatus = " [green]Config:[white] Watching [yellow]🔄[white]"
+	}
+
 	summary := fmt.Sprintf(
-		"[green]Server:[white] http://localhost:%s  [green]Providers:[white] %d  [green]Models:[white] %d\n"+
+		"[green]Server:[white] http://localhost:%s  [green]Providers:[white] %d  [green]Models:[white] %d%s%s\n"+
 			"[green]Requests:[white] %d  [green]Success:[white] %d  [red]Errors:[white] %d  [yellow]Error Rate:[white] %.2f%%\n"+
-			"[grey]Updated: %s  |  Press Tab/1-3 to switch pages, q to quit",
+			"[grey]Updated: %s  |  Press Tab/1-4 to switch pages, q to quit",
 		port,
 		p.providerManager.Size(),
 		len(p.cfg.Spec.Models),
+		benchmarkStatus,
+		configStatus,
 		totalRequests,
 		totalSuccess,
 		totalErrors,
@@ -379,11 +400,16 @@ func (p *OverviewPage) SetupInputCapture(switchPage func(string)) {
 			switchPage("logs")
 			return nil
 		case tcell.KeyBacktab:
-			switchPage("config")
+			switchPage("benchmark") // Go to benchmark on backtab
 			return nil
 		}
 		return event
 	})
+}
+
+// SetConfigWatching sets whether config watching is enabled
+func (p *OverviewPage) SetConfigWatching(watching bool) {
+	p.isConfigWatching = watching
 }
 
 // Helper functions
