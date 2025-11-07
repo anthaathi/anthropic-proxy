@@ -1,0 +1,198 @@
+spec:
+  # Provider configurations
+  # Each provider needs an endpoint and API key
+  providers:
+    # Anthropic official API
+    anthropic:
+      endpoint: https://api.anthropic.com
+      apiKey: env.ANTHROPIC_API_KEY
+
+    # OpenRouter - Multi-model API gateway
+    openrouter:
+      endpoint: https://openrouter.ai/api/v1
+      apiKey: env.OPENROUTER_API_KEY
+
+    # Chutes AI - Claude proxy
+    chutes:
+      endpoint: https://claude.chutes.ai
+      apiKey: env.CHUTES_API_KEY
+
+    # Z.ai - AI API provider
+    zai:
+      endpoint: https://api.z.ai/api/anthropic
+      apiKey: env.ZAI_API_KEY
+
+    # DeepSeek - Chinese AI provider with Anthropic-compatible API
+    deepseek:
+      endpoint: https://api.deepseek.com/anthropic
+      apiKey: env.DEEPSEEK_API_KEY
+
+    # Together AI - Model hosting platform
+    together:
+      endpoint: https://api.together.xyz
+      apiKey: env.TOGETHER_API_KEY
+
+    # Custom self-hosted endpoint
+    selfhosted:
+      endpoint: http://localhost:11434/v1
+      apiKey: "not-needed"  # For local servers that don't require auth
+
+    # AWS Bedrock proxy (example)
+    bedrock:
+      endpoint: https://bedrock-runtime.us-east-1.amazonaws.com
+      apiKey: env.AWS_ACCESS_KEY
+
+  # Retry configuration (optional)
+  # Controls how requests are retried on failure
+  retry:
+    maxRetries: 3                     # Maximum number of retries per provider (default: 3)
+    initialDelay: 100ms               # Initial delay before first retry (default: 100ms)
+    maxDelay: 5s                      # Maximum delay between retries (default: 5s)
+    backoffMultiplier: 2.0            # Exponential backoff multiplier (default: 2.0)
+
+  # Model configurations
+  # Each model maps to a provider and can have an alias
+  models:
+    # Claude Opus models
+    - name: "claude-opus-4-20250514"
+      context: 200000
+      alias: "claude-opus*"
+      provider: anthropic
+      weight: 5
+
+    - name: "anthropic/claude-opus-4-20250514"
+      context: 200000
+      alias: "claude-opus*"
+      provider: openrouter
+      weight: 4
+
+    # Claude Sonnet models
+    - name: "claude-sonnet-4-5-20250929"
+      context: 200000
+      alias: "claude-sonnet*"
+      provider: anthropic
+      weight: 5
+
+    - name: "moonshotai/Kimi-K2-Thinking"
+      context: 256000
+      alias: "claude-sonnet*"
+      provider: chutes
+      weight: 3
+
+    - name: "glm-4.6"
+      context: 256000
+      alias: "claude-sonnet*"
+      provider: zai
+      weight: 3
+
+    - name: "deepseek-chat"
+      context: 200000
+      alias: "claude-sonnet*"
+      provider: deepseek
+      weight: 2
+
+    # Claude Haiku models (fast, lightweight)
+    - name: "claude-haiku-3-5-20250110"
+      context: 200000
+      alias: "claude-haiku*"
+      provider: anthropic
+      weight: 5
+
+    - name: "GLM-4.5-Air"
+      context: 256000
+      alias: "claude-haiku*"
+      provider: zai
+      weight: 3
+
+    - name: "moonshotai/Kimi-K2-Thinking"
+      context: 256000
+      alias: "claude-haiku*"
+      provider: chutes
+      weight: 2
+
+    # Exact model name match (no wildcard)
+    - name: "claude-3-opus-20240229"
+      context: 200000
+      alias: "claude-3-opus-20240229"
+      provider: anthropic
+      weight: 5
+
+  # API keys for authenticating incoming requests
+  # These are the keys clients will use to access your proxy
+  apiKeys:
+    - "$RANDOM_KEY"                     # Will auto-generate a random key on startup
+    - "env.PROXY_API_KEY"               # Read from PROXY_API_KEY environment variable
+    - "sk-proxy-example-key-123"        # Static API key example
+
+# Configuration notes:
+#
+# Environment Variables:
+#   - Use "env.VAR_NAME" to read from environment variable
+#   - Use "$RANDOM_KEY" to auto-generate a secure random key
+#   - Or use static values directly
+#
+# Model Aliases:
+#   - Use "*" for wildcard matching
+#   - "opus*" matches any model name starting with "opus"
+#   - "*opus" matches any model name ending with "opus"
+#   - "opus" matches exactly "opus" (no wildcard)
+#
+# Provider Endpoints:
+#   - Must be valid HTTP/HTTPS URLs
+#   - Should point to Anthropic-compatible API endpoints
+#   - Can be self-hosted or third-party services
+#
+# Retry Configuration:
+#   - Requests are automatically retried on network errors, rate limits (429), and server errors (5xx)
+#   - Each provider is retried up to maxRetries times with exponential backoff
+#   - After all retries fail, the next provider in the list is tried
+#   - Client errors (4xx except 429) are NOT retried
+#
+# Routing Logic:
+#   1. Models with TPS < 40 are excluded
+#   2. Models are sorted by weight (higher first)
+#   3. If weights are equal, higher TPS wins
+#   4. On failure, retries the same provider with backoff
+#   5. After retries exhausted, tries next provider in order
+#
+# Running the proxy:
+#   1. Set environment variables:
+#      export ANTHROPIC_API_KEY=your-anthropic-key
+#      export OPENROUTER_API_KEY=your-openrouter-key
+#      export CHUTES_API_KEY=your-chutes-key
+#      export ZAI_API_KEY=your-zai-key
+#      export DEEPSEEK_API_KEY=your-deepseek-key
+#      export TOGETHER_API_KEY=your-together-key
+#      export PROXY_API_KEY=your-proxy-key
+#      export PORT=8080
+#      export LOG_LEVEL=INFO  # Options: DEBUG, INFO, WARN, ERROR (default: INFO)
+#
+#   2. Start the server:
+#      go run main.go
+#
+#   3. Use the proxy:
+#      curl -X POST http://localhost:8080/v1/messages \
+#        -H "Authorization: Bearer sk-proxy-example-key-123" \
+#        -H "Content-Type: application/json" \
+#        -d '{
+#          "model": "claude-sonnet-4-5-20250929",
+#          "messages": [{"role": "user", "content": "Hello, how are you?"}],
+#          "max_tokens": 1024
+#        }'
+#
+# Example with alias matching:
+#      curl -X POST http://localhost:8080/v1/messages \
+#        -H "Authorization: Bearer sk-proxy-example-key-123" \
+#        -H "Content-Type: application/json" \
+#        -d '{
+#          "model": "claude-opus-latest",
+#          "messages": [{"role": "user", "content": "Explain quantum computing"}],
+#          "max_tokens": 2048
+#        }'
+#
+# Tips:
+#   - Use weights to prioritize certain providers or models
+#   - Higher weight = higher priority in routing decisions
+#   - Models with weight 0 or negative are treated as weight 1
+#   - Use wildcard aliases for flexible model routing
+#   - Monitor TPS (tokens per second) for performance-based routing
